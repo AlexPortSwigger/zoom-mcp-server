@@ -1,31 +1,36 @@
 #!/bin/bash
 
 # Zoom MCP Server Wrapper
-# Loads environment variables and starts the Zoom MCP server
+# Loads environment variables, activates venv, and starts the server
 
 set -e
 
-# Resolve paths relative to this script
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
+VENV_DIR="$SCRIPT_DIR/.venv"
 
+# Load .env
 if [[ -f "$ENV_FILE" ]]; then
     set -a
     source "$ENV_FILE"
     set +a
 else
-    echo "Error: .env file not found at $ENV_FILE"
-    echo "Copy .env.example to .env and add your Zoom credentials"
+    echo "Error: .env file not found. Run ./setup.sh first." >&2
     exit 1
 fi
 
-# Verify required environment variables
+# Verify credentials
 if [[ -z "$ZOOM_CLIENT_ID" || -z "$ZOOM_CLIENT_SECRET" ]]; then
-    echo "Error: Missing required Zoom environment variables"
-    echo "Required: ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET"
+    echo "Error: Missing ZOOM_CLIENT_ID or ZOOM_CLIENT_SECRET in .env" >&2
     exit 1
 fi
 
-# Start the Zoom MCP server
+# Use venv Python if available, otherwise system Python
+if [[ -f "$VENV_DIR/bin/python3" ]]; then
+    PYTHON="$VENV_DIR/bin/python3"
+else
+    PYTHON="python3"
+fi
+
 cd "$SCRIPT_DIR"
-exec python3 zoom_server.py
+exec "$PYTHON" zoom_server.py
