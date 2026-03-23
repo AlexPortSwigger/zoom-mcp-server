@@ -45,9 +45,55 @@ If you don't already have one:
    - `contact:read`, `user:read`
 4. Copy your **Client ID** and **Client Secret**
 
+### Option C: Claude Desktop App
+
+The Claude Desktop app uses a different config file and **cannot run bash wrapper scripts** (macOS blocks execution from cloud-synced directories). Instead, copy files locally and point to Python directly.
+
+1. **Copy server files to a local path:**
+   ```bash
+   mkdir -p ~/.zoom-mcp
+   cp zoom_server.py zoom_oauth_handler.py base_mcp_server.py requirements.txt ~/.zoom-mcp/
+   cp -r utils ~/.zoom-mcp/
+   ```
+
+2. **Create venv:**
+   ```bash
+   cd ~/.zoom-mcp
+   python3 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
+   ```
+
+3. **Create `.env`:**
+   ```bash
+   cat > ~/.zoom-mcp/.env << 'EOF'
+   ZOOM_CLIENT_ID=your_client_id
+   ZOOM_CLIENT_SECRET=your_client_secret
+   ZOOM_REDIRECT_URI=http://localhost:8000/oauth/callback
+   EOF
+   ```
+
+4. **Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:**
+   ```json
+   {
+     "mcpServers": {
+       "zoom-integration": {
+         "command": "/Users/YOUR_USERNAME/.zoom-mcp/.venv/bin/python3",
+         "args": ["/Users/YOUR_USERNAME/.zoom-mcp/zoom_server.py"],
+         "env": {
+           "ZOOM_CLIENT_ID": "your_client_id",
+           "ZOOM_CLIENT_SECRET": "your_client_secret",
+           "ZOOM_REDIRECT_URI": "http://localhost:8000/oauth/callback"
+         }
+       }
+     }
+   }
+   ```
+
+5. **Restart Claude Desktop** (Cmd+Q then reopen — just closing the window isn't enough).
+
 ### First Use
 
-After restarting Claude Code, the first time you use a Zoom tool it will open your browser to authorize with Zoom. This is a one-time step - tokens refresh automatically after that.
+After restarting Claude Code or Claude Desktop, the first time you use a Zoom tool it will open your browser to authorize with Zoom. This is a one-time step - tokens refresh automatically after that.
 
 ## What you can do
 
