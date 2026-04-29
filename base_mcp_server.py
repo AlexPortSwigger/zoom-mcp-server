@@ -54,9 +54,14 @@ class BaseMCPServer(ABC):
         logger = logging.getLogger(self.server_name)
         logger.setLevel(logging.INFO)
 
-        # Create logs directory relative to this file
-        log_dir = Path(__file__).parent / "logs"
-        log_dir.mkdir(exist_ok=True)
+        # Logs directory: respect ZOOM_LOG_DIR if set (useful for bundled installs
+        # where the extension directory may be read-only or wiped on update).
+        log_dir_env = os.getenv("ZOOM_LOG_DIR")
+        if log_dir_env:
+            log_dir = Path(os.path.expanduser(log_dir_env))
+        else:
+            log_dir = Path(__file__).parent / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
 
         # File handler
         file_handler = logging.FileHandler(log_dir / f"{self.server_name}.log")

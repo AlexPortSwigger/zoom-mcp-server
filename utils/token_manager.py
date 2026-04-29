@@ -39,6 +39,8 @@ class TokenManager:
 
         if token_dir:
             self.token_dir = Path(token_dir)
+        elif os.getenv("ZOOM_TOKEN_DIR"):
+            self.token_dir = Path(os.path.expanduser(os.environ["ZOOM_TOKEN_DIR"]))
         else:
             self.token_dir = Path(__file__).parent.parent / "tokens"
 
