@@ -1,0 +1,65 @@
+{
+  "manifest_version": "0.2",
+  "name": "zoom-integration",
+  "display_name": "Zoom Team Chat",
+  "version": "1.0.0",
+  "description": "Zoom Team Chat MCP server — list/send messages, manage channels, search contacts, and more.",
+  "long_description": "Exposes ~30 Zoom Team Chat API endpoints as MCP tools. First use opens a browser for OAuth; tokens are cached at ~/.zoom-mcp/tokens/ and refreshed automatically. Requires a Zoom Marketplace OAuth app (General App) with scopes chat_message:read/write, chat_channel:read/write, contact:read, user:read and redirect URI http://localhost:8000/oauth/callback.",
+  "author": {
+    "name": "Tom Shelton-Lefley"
+  },
+  "license": "MIT",
+  "server": {
+    "type": "python",
+    "entry_point": "server/bootstrap.py",
+    "mcp_config": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "PY=\"$(command -v python3 || command -v python)\"; [ -n \"$PY\" ] || { echo 'zoom-mcp: no python3 or python found on PATH' >&2; exit 127; }; exec \"$PY\" \"$@\"",
+        "zoom-mcp",
+        "${__dirname}/server/bootstrap.py"
+      ],
+      "env": {
+        "ZOOM_CLIENT_ID": "${user_config.zoom_client_id}",
+        "ZOOM_CLIENT_SECRET": "${user_config.zoom_client_secret}",
+        "ZOOM_REDIRECT_URI": "http://localhost:8000/oauth/callback",
+        "ZOOM_MCP_HOME": "${HOME}/.zoom-mcp",
+        "ZOOM_TOKEN_DIR": "${HOME}/.zoom-mcp/tokens",
+        "ZOOM_LOG_DIR": "${HOME}/.zoom-mcp/logs"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "cmd",
+          "args": [
+            "/c",
+            "where python3 >nul 2>nul && (python3 \"%1\") || (where python >nul 2>nul && (python \"%1\") || (echo zoom-mcp: no python3 or python found on PATH 1>&2 & exit /b 127))",
+            "${__dirname}/server/bootstrap.py"
+          ]
+        }
+      }
+    }
+  },
+  "user_config": {
+    "zoom_client_id": {
+      "type": "string",
+      "title": "Zoom Client ID",
+      "description": "Client ID from your Zoom Marketplace OAuth app (Develop > Build App > General App).",
+      "required": true,
+      "sensitive": false
+    },
+    "zoom_client_secret": {
+      "type": "string",
+      "title": "Zoom Client Secret",
+      "description": "Client Secret from your Zoom Marketplace OAuth app. Stored locally; never sent anywhere except Zoom.",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

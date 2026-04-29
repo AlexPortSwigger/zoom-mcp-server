@@ -4,3 +4,10 @@ logs/
 .venv/
 __pycache__/
 *.pyc
+
+# mcpb pack stages copies of repo root files into build/server/.
+# Only the bundle-specific files (manifest, bootstrap, .mcpbignore) are tracked.
+build/server/*.py
+!build/server/bootstrap.py
+build/server/utils/
+build/server/requirements.txt

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+server/tokens/
+server/logs/
+server/.venv/
+server/.env
