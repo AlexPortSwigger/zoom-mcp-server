@@ -66,20 +66,24 @@ def get_required_env(name: str) -> str:
     return v
 
 
+# Defaults bake in PortSwigger's Zoom dev app + Public Client OAuth (PKCE).
+# Dev apps allow http://localhost callbacks; public client ID means no secret.
+DEFAULT_CLIENT_ID = "EIQOYZ5wQBCSQk3a48lT6A"
+DEFAULT_REDIRECT_URI = "http://localhost:8000/oauth/callback"
+
+
 async def run() -> None:
     logger = setup_logging()
     logger.info("Zoom MCP server starting")
 
-    client_id = get_required_env("ZOOM_CLIENT_ID")
-    client_secret = get_required_env("ZOOM_CLIENT_SECRET")
-    redirect_uri = os.environ.get(
-        "ZOOM_REDIRECT_URI", "http://localhost:8000/oauth/callback"
-    )
+    # PKCE flow — no client_secret. Defaults bake in the PortSwigger Zoom
+    # app + GitHub Pages bridge so Swiggers don't have to configure anything.
+    client_id = os.environ.get("ZOOM_CLIENT_ID") or DEFAULT_CLIENT_ID
+    redirect_uri = os.environ.get("ZOOM_REDIRECT_URI") or DEFAULT_REDIRECT_URI
 
     token_store = TokenStore(token_file(), token_key_file())
     oauth = ZoomOAuthHandler(
         client_id=client_id,
-        client_secret=client_secret,
         token_store=token_store,
         redirect_uri=redirect_uri,
         logger=logger,

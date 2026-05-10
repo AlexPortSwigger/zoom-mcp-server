@@ -8,7 +8,15 @@ from typing import Any, Dict, List
 
 from mcp.types import Tool
 
-from . import ai_companion, files, messages, shared_spaces, transcripts
+from . import (
+    ai_companion,
+    files,
+    messages,
+    search,
+    shared_spaces,
+    summaries,
+    transcripts,
+)
 from .cache.store import CacheStore
 from .dispatcher import paginate_all
 from .endpoints import API_BASE, ENDPOINTS, endpoint_by_name
@@ -74,19 +82,29 @@ class ZoomTools:
     # ---- auth handlers ----
 
     async def _authenticate(self) -> List[Dict[str, Any]]:
-        if await self.oauth.ensure_authenticated():
-            r = await self.oauth.make_authenticated_request(
-                "GET", f"{API_BASE}/users/me"
+        if not self.oauth.token_store.is_expired():
+            return _text(
+                "Already authenticated. Use zoom_revoke_authentication "
+                "first to re-auth."
             )
-            if r.status_code == 200:
-                u = r.json()
-                return _text(
-                    "Authenticated.\n"
-                    f"User: {u.get('display_name')}\n"
-                    f"Email: {u.get('email')}"
-                )
-            return _err(f"Auth OK but user info failed: HTTP {r.status_code}")
-        return _err("Authentication failed.")
+        ok = await self.oauth.run_browser_flow()
+        if not ok:
+            return _err(
+                "Authentication failed. Common causes: port 8000 in use; "
+                "OAuth window closed before granting access; auth timed out "
+                "(5 min limit)."
+            )
+        r = await self.oauth.make_authenticated_request(
+            "GET", f"{API_BASE}/users/me"
+        )
+        if r.status_code == 200:
+            u = r.json()
+            return _text(
+                "Authenticated.\n"
+                f"User: {u.get('display_name')}\n"
+                f"Email: {u.get('email')}"
+            )
+        return _err(f"Auth OK but user info failed: HTTP {r.status_code}")
 
     async def _revoke(self) -> List[Dict[str, Any]]:
         try:
@@ -176,6 +194,44 @@ class ZoomTools:
             from_date=args.get("from_date"),
             to_date=args.get("to_date"),
         )
+        return _json(out)
+
+    # ---- Cross-channel search (manual fan-out) ----
+
+    async def _h_search_messages(self, args):
+        # Make sure we have channels and contacts cached for the fan-out
+        channels = self.cache.get_channels()
+        if not channels:
+            await self._refresh_channels()
+            channels = self.cache.get_channels()
+        contacts = self.cache.get_contacts()
+        if not contacts:
+            await self._refresh_contacts()
+            contacts = self.cache.get_contacts()
+        out = await search.search_messages(
+            self.oauth,
+            channels=channels,
+            contacts=contacts,
+            query=args["query"],
+            from_date=args.get("from_date"),
+            to_date=args.get("to_date"),
+            channel_filter=args.get("channel_filter"),
+            max_results=int(args.get("max_results", 100)),
+        )
+        return _json(out)
+
+    # ---- Meeting summaries (real AI Companion APIs) ----
+
+    async def _h_list_meeting_summaries(self, args):
+        items = await summaries.list_meeting_summaries(
+            self.oauth,
+            from_date=args.get("from_date"),
+            to_date=args.get("to_date"),
+        )
+        return _json({"summaries": items, "count": len(items)})
+
+    async def _h_get_meeting_summary(self, args):
+        out = await summaries.get_meeting_summary(self.oauth, args["meeting_id"])
         return _json(out)
 
     # ---- channels & contacts ----
