@@ -23,7 +23,11 @@ async def _reset_client():
 def authed_oauth(tmp_path):
     store = TokenStore(tmp_path / "tok.enc", tmp_path / "tok.key")
     store.save("AT", "RT", datetime.now() + timedelta(hours=1))
-    return ZoomOAuthHandler("cid", "csec", token_store=store)
+    return ZoomOAuthHandler(
+        client_id="CID",
+        token_store=store,
+        redirect_uri="http://localhost:8000/oauth/callback",
+    )
 
 
 @pytest.fixture
@@ -43,6 +47,13 @@ def test_list_tools_names_match_endpoints(authed_oauth, cache):
     expected = {ep["name"] for ep in ENDPOINTS}
     actual = {t.name for t in tools}
     assert actual == expected
+
+
+def test_auth_tools_present(authed_oauth, cache):
+    tools = ZoomTools(authed_oauth, cache).list_tools()
+    names = {t.name for t in tools}
+    assert "zoom_authenticate" in names
+    assert "zoom_revoke_authentication" in names
 
 
 @pytest.mark.asyncio
@@ -65,6 +76,14 @@ async def test_revoke_clears_tokens_and_cache(authed_oauth, cache, tmp_path):
     assert "revoked" in out[0]["text"].lower()
     assert authed_oauth.token_store.load() is None
     assert cache.get_channels() == []
+
+
+@pytest.mark.asyncio
+async def test_authenticate_skips_when_already_valid(authed_oauth, cache):
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_authenticate", {}
+    )
+    assert "Already authenticated" in out[0]["text"]
 
 
 @pytest.mark.asyncio
