@@ -74,19 +74,29 @@ class ZoomTools:
     # ---- auth handlers ----
 
     async def _authenticate(self) -> List[Dict[str, Any]]:
-        if await self.oauth.ensure_authenticated():
-            r = await self.oauth.make_authenticated_request(
-                "GET", f"{API_BASE}/users/me"
+        if not self.oauth.token_store.is_expired():
+            return _text(
+                "Already authenticated. Use zoom_revoke_authentication "
+                "first to re-auth."
             )
-            if r.status_code == 200:
-                u = r.json()
-                return _text(
-                    "Authenticated.\n"
-                    f"User: {u.get('display_name')}\n"
-                    f"Email: {u.get('email')}"
-                )
-            return _err(f"Auth OK but user info failed: HTTP {r.status_code}")
-        return _err("Authentication failed.")
+        ok = await self.oauth.run_browser_flow()
+        if not ok:
+            return _err(
+                "Authentication failed. Common causes: port 8000 in use; "
+                "OAuth window closed before granting access; auth timed out "
+                "(5 min limit)."
+            )
+        r = await self.oauth.make_authenticated_request(
+            "GET", f"{API_BASE}/users/me"
+        )
+        if r.status_code == 200:
+            u = r.json()
+            return _text(
+                "Authenticated.\n"
+                f"User: {u.get('display_name')}\n"
+                f"Email: {u.get('email')}"
+            )
+        return _err(f"Auth OK but user info failed: HTTP {r.status_code}")
 
     async def _revoke(self) -> List[Dict[str, Any]]:
         try:

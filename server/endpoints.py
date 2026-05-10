@@ -18,7 +18,7 @@ ENDPOINTS: List[Dict[str, Any]] = [
     # ---------- Auth & meta ----------
     {
         "name": "zoom_authenticate",
-        "summary": "Authenticate with Zoom (opens browser for OAuth)",
+        "summary": "Authenticate with Zoom (opens browser, captures callback locally)",
         "handler": "authenticate",
     },
     {
