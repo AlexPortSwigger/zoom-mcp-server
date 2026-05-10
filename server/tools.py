@@ -57,6 +57,12 @@ class ZoomTools:
     async def call_tool(
         self, name: str, args: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
+        # Translate any legacy tool name to its current canonical name. This
+        # makes the server resilient to MCP-host clients that have a stale
+        # cached tool list from before the zoom_<group>_* rename — they can
+        # keep working until the host refreshes its cache.
+        name = _LEGACY_TOOL_ALIASES.get(name, name)
+
         try:
             ep = endpoint_by_name(name)
         except KeyError:
@@ -556,3 +562,43 @@ def _annotations_for(tool_name: str) -> ToolAnnotations:
         return ToolAnnotations(readOnlyHint=False, destructiveHint=False)
     # Default: read-only Zoom API call
     return ToolAnnotations(readOnlyHint=True, destructiveHint=False)
+
+
+# ---- legacy tool name aliases ----
+#
+# Pre-rename tool names accepted as aliases for the new zoom_<group>_*
+# names. Useful when an MCP host has a stale cached tool list (e.g. it
+# hasn't yet refreshed after a connector update). The alias is applied
+# at the start of call_tool so the rest of the dispatch is identical.
+_LEGACY_TOOL_ALIASES: Dict[str, str] = {
+    # auth
+    "zoom_authenticate":          "zoom_auth_login",
+    "zoom_revoke_authentication": "zoom_auth_logout",
+    "zoom_get_my_info":           "zoom_auth_whoami",
+    "zoom_resolve":               "zoom_auth_resolve",
+    # chat — channels & people
+    "zoom_list_channels":          "zoom_chat_channels",
+    "zoom_list_channel_members":   "zoom_chat_channel_members",
+    "zoom_list_contacts":          "zoom_chat_contacts",
+    "zoom_list_shared_spaces":     "zoom_chat_shared_spaces",
+    "zoom_get_shared_space":       "zoom_chat_shared_space_get",
+    # meetings & recordings
+    "zoom_list_meetings":           "zoom_meeting_list",
+    "zoom_get_meeting":             "zoom_meeting_get",
+    "zoom_list_recordings":         "zoom_meeting_recordings",
+    "zoom_get_meeting_transcript":  "zoom_meeting_transcript",
+    "zoom_list_meeting_summaries":  "zoom_meeting_summary_list",
+    "zoom_get_meeting_summary":     "zoom_meeting_summary_get",
+    # messages, threads, files, etc.
+    "zoom_get_channel_history":  "zoom_message_history",
+    "zoom_get_thread":           "zoom_message_thread",
+    "zoom_get_message":          "zoom_message_get",
+    "zoom_get_file":             "zoom_message_file",
+    "zoom_list_pinned_messages": "zoom_message_pinned",
+    "zoom_list_bookmarks":       "zoom_message_bookmarks",
+    "zoom_list_mention_groups":  "zoom_message_mentions",
+    # search
+    "zoom_search":          "zoom_search_ai",
+    "zoom_ask":             "zoom_search_ask",
+    # zoom_search_messages did not change name
+}
