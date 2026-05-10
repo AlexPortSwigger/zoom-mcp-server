@@ -9,7 +9,6 @@ from typing import Any, Dict, List
 from mcp.types import Tool, ToolAnnotations
 
 from . import (
-    ai_companion,
     files,
     messages,
     search,
@@ -182,29 +181,6 @@ class ZoomTools:
                 "message": f"No match for {query!r} in cache.",
             }
         )
-
-    # ---- AI Companion ----
-
-    async def _h_ai_companion_search(self, args):
-        out = await ai_companion.search(
-            self.oauth,
-            query=args["query"],
-            scope=args.get("scope"),
-            from_date=args.get("from_date"),
-            to_date=args.get("to_date"),
-            max_results=int(args.get("max_results", 50)),
-        )
-        return _json(out)
-
-    async def _h_ai_companion_ask(self, args):
-        out = await ai_companion.ask(
-            self.oauth,
-            question=args["question"],
-            scope=args.get("scope"),
-            from_date=args.get("from_date"),
-            to_date=args.get("to_date"),
-        )
-        return _json(out)
 
     # ---- Cross-channel search (manual fan-out) ----
 
@@ -418,20 +394,6 @@ class ZoomTools:
         items = await messages.list_bookmarks(self.oauth)
         return _json({"bookmarks": items, "count": len(items)})
 
-    async def _h_list_mention_groups(self, args):
-        channel_id = await self._resolve_channel_id(args["channel"])
-        if not channel_id:
-            return _err(f"Unknown channel: {args['channel']!r}")
-        items = await messages.list_mention_groups(self.oauth, channel_id)
-        self.cache.put_mention_groups(channel_id, items)
-        return _json(
-            {
-                "channel_id": channel_id,
-                "mention_groups": items,
-                "count": len(items),
-            }
-        )
-
     # ---- shared spaces ----
 
     async def _h_list_shared_spaces(self, args):
@@ -596,9 +558,12 @@ _LEGACY_TOOL_ALIASES: Dict[str, str] = {
     "zoom_get_file":             "zoom_message_file",
     "zoom_list_pinned_messages": "zoom_message_pinned",
     "zoom_list_bookmarks":       "zoom_message_bookmarks",
-    "zoom_list_mention_groups":  "zoom_message_mentions",
-    # search
-    "zoom_search":          "zoom_search_ai",
-    "zoom_ask":             "zoom_search_ask",
     # zoom_search_messages did not change name
+    # NOTE: zoom_search_ai, zoom_search_ask, and zoom_message_mentions /
+    # zoom_list_mention_groups are intentionally NOT mapped — Zoom's
+    # underlying REST endpoints don't exist publicly (verified via the
+    # Zoom OpenAPI spec for AI Companion and live probing of every
+    # plausible URL variant for mention_groups), so callers using stale
+    # cached aliases for those tools should get an "unknown tool" error
+    # rather than silently routing to a handler that always 404s.
 }

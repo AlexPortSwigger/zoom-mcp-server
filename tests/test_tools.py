@@ -35,11 +35,21 @@ def cache(tmp_path):
     return CacheStore(tmp_path / "cache.db")
 
 
-def test_list_tools_returns_25(authed_oauth, cache):
+def test_list_tools_returns_22(authed_oauth, cache):
+    """v2.2.5: removed 3 tools whose Zoom REST endpoints don't exist
+    publicly (zoom_search_ai, zoom_search_ask — verified missing in
+    Zoom's AI Companion OpenAPI spec; zoom_message_mentions — every
+    URL variant of /chat/channels/{id}/mention_groups returns code
+    2300 'endpoint not recognized')."""
     tools = ZoomTools(authed_oauth, cache).list_tools()
-    assert len(tools) == 25
+    assert len(tools) == 22
     assert all(hasattr(t, "name") for t in tools)
     assert all(hasattr(t, "description") for t in tools)
+    # Removed tools must NOT reappear
+    names = {t.name for t in tools}
+    assert "zoom_search_ai" not in names
+    assert "zoom_search_ask" not in names
+    assert "zoom_message_mentions" not in names
 
 
 def test_list_tools_names_match_endpoints(authed_oauth, cache):
@@ -119,7 +129,7 @@ async def test_legacy_alias_for_authenticate_when_already_valid(
 
 
 def test_tool_annotations_split_into_three_groups(authed_oauth, cache):
-    """Confirm exact bucket counts: 23 read-only, 1 write, 1 destructive."""
+    """Confirm exact bucket counts: 20 read-only, 1 write, 1 destructive."""
     tools = ZoomTools(authed_oauth, cache).list_tools()
     read_only = [t for t in tools if t.annotations.readOnlyHint is True]
     write = [
@@ -130,7 +140,7 @@ def test_tool_annotations_split_into_three_groups(authed_oauth, cache):
     destructive = [
         t for t in tools if t.annotations.destructiveHint is True
     ]
-    assert len(read_only) == 23
+    assert len(read_only) == 20
     assert len(write) == 1
     assert len(destructive) == 1
     assert write[0].name == "zoom_auth_login"
@@ -145,7 +155,9 @@ async def test_call_tool_unknown_returns_error(authed_oauth, cache):
 
 @pytest.mark.asyncio
 async def test_call_tool_missing_required_arg(authed_oauth, cache):
-    out = await ZoomTools(authed_oauth, cache).call_tool("zoom_search_ai", {})
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_search_messages", {}
+    )
     assert "Missing required argument: query" in out[0]["text"]
 
 
