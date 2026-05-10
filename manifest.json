@@ -18,8 +18,7 @@
       "env": {
         "ZOOM_CLIENT_ID":     "${user_config.client_id}",
         "ZOOM_CLIENT_SECRET": "${user_config.client_secret}",
-        "ZOOM_REDIRECT_URI":  "${user_config.redirect_uri}",
-        "PYTHONPATH":         "${__dirname}/server/lib"
+        "ZOOM_REDIRECT_URI":  "${user_config.redirect_uri}"
       }
     }
   },
