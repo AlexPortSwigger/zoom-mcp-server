@@ -13,31 +13,24 @@ Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config b
 
 The MCPB has the PortSwigger Zoom dev app's **public client ID** baked in, and uses **PKCE** (RFC 7636) — no client secret anywhere.
 
-## What's available (20 tools)
+## What's available (25 tools)
 
 | Category | Tools |
 |---|---|
 | **Auth** | `zoom_authenticate`, `zoom_revoke_authentication` |
 | **Info & resolve** | `zoom_get_my_info`, `zoom_resolve` |
-| **Cross-channel search** | `zoom_search_messages` (parallel fan-out across channels + DMs) |
-| **Channels** | `zoom_list_channels` (with `starred` filter), `zoom_list_channel_members`, `zoom_list_contacts` |
-| **Messages** | `zoom_get_channel_history`, `zoom_get_thread`, `zoom_get_message`, `zoom_list_pinned_messages` *(unverified)* |
-| **Shared spaces** | `zoom_list_shared_spaces`, `zoom_get_shared_space` *(unverified)* |
+| **AI Companion** | `zoom_search` (cross-source search), `zoom_ask` (grounded Q&A with citations) |
+| **Manual cross-channel search** | `zoom_search_messages` (parallel fan-out fallback / exact-substring queries) |
+| **Channels** | `zoom_list_channels` (with starred filter), `zoom_list_channel_members`, `zoom_list_contacts` |
+| **Messages** | `zoom_get_channel_history`, `zoom_get_thread`, `zoom_get_message`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_mention_groups` |
+| **Files** | `zoom_get_file` (text content for text/code MIME types) |
+| **Shared spaces** | `zoom_list_shared_spaces`, `zoom_get_shared_space` |
 | **Meetings** | `zoom_list_meetings`, `zoom_get_meeting`, `zoom_list_recordings`, `zoom_get_meeting_transcript` |
-| **AI Companion meeting summaries** | `zoom_list_meeting_summaries`, `zoom_get_meeting_summary` |
+| **AI meeting summaries** | `zoom_list_meeting_summaries`, `zoom_get_meeting_summary` |
 
-Attachments and emoji reactions appear inline on every message returned by the message tools (when the corresponding scopes are granted).
+`zoom_search` and `zoom_ask` use Zoom AI Companion to search and answer questions across Zoom Meetings, Chat, and Docs in a single call with grounded citations. `zoom_search_messages` is the manual fan-out fallback for queries where you want raw substring matching across channels and DMs.
 
-### What's *not* in v2.2
-
-We removed three things from the v2.0/v2.1 design after verifying they don't have public Zoom APIs:
-
-- ~~`zoom_search`, `zoom_ask`~~ — Zoom doesn't expose AI Companion `search`/`ask` over a public API. Replaced by `zoom_search_messages` (manual fan-out, no AI ranking) and `zoom_list_meeting_summaries` / `zoom_get_meeting_summary` (the *real* AI Companion APIs).
-- ~~`zoom_list_bookmarks`~~ — bookmarks appear to be UI-only.
-- ~~`zoom_list_mention_groups`~~ — confirmed by Zoom forum: no public API for reading mention groups.
-- ~~`zoom_get_file`~~ — Zoom has no standalone GET-by-file-id endpoint. Attachment metadata is already returned inline on each message via the `files` array.
-
-The `zoom_list_pinned_messages`, `zoom_list_shared_spaces`, and `zoom_get_shared_space` tools use endpoint paths that aren't fully canonicalised in Zoom's docs. They may return 404; smoke-test them and we'll drop or fix as needed.
+Attachments and emoji reactions appear inline on every message returned by the message tools.
 
 ## How auth works
 
@@ -54,7 +47,7 @@ Claude → Browser → zoom.us/oauth/authorize?code_challenge=… → user click
                                Windows: %APPDATA%\zoom-mcp\
 ```
 
-PKCE `code_verifier` never leaves the machine. State value verified for CSRF protection.
+PKCE `code_verifier` never leaves the machine. State value verified on the OAuth callback for CSRF protection.
 
 ## One-time PortSwigger admin setup (already done)
 
@@ -75,6 +68,8 @@ PKCE `code_verifier` never leaves the machine. State value verified for CSRF pro
 ## OAuth scopes
 
 ```
+ai_companion:read:ask
+ai_companion:read:search
 contact:read:list_contacts
 meeting:read:meeting
 meeting_summary:read:summary
@@ -83,9 +78,6 @@ cloud_recording:read:list_recording_files
 cloud_recording:read:recording
 cloud_recording:read:meeting_transcript
 cloud_recording:read:content
-chat_channel:read
-chat_message:read
-chat_contact:read
 team_chat:read:channel
 team_chat:read:user_channel
 team_chat:read:list_user_channels
@@ -95,6 +87,10 @@ team_chat:read:user_message
 team_chat:read:thread_message
 team_chat:read:message_emoji
 team_chat:read:list_pinned_messages
+team_chat:read:list_bookmarks
+team_chat:read:file
+team_chat:read:chat_control
+team_chat:read:mention_group
 team_chat:read:list_contacts
 team_chat:read:contact
 team_chat:read:shared_space
@@ -103,8 +99,6 @@ team_chat:read:list_shared_space_channels
 team_chat:read:list_shared_space_members
 user:read:user
 ```
-
-The deprecated `ai_companion:read:ask` and `ai_companion:read:search` scopes are no longer requested. `meeting_summary:read:summary` is added for the real summary API.
 
 ## Forking
 
@@ -122,8 +116,7 @@ To use this with a different Zoom app:
 | "Port 8000 already in use" | `lsof -i :8000`; kill the conflicting process; re-run `zoom_authenticate` |
 | Auth window closed without authorising | Re-run `zoom_authenticate` |
 | Tokens expired and refresh fails | Run `zoom_revoke_authentication`, then `zoom_authenticate` |
-| Pinned/shared-spaces tools return errors | Endpoint paths unverified in v2.2 — open an issue with the error |
-| Cross-channel search is slow | Concurrency is capped at 20; expect 1-3s for ≤200 channels, ~5-7s for ≤500 |
+| AI Companion tools 403 | AI Companion not enabled on your account; ask your Zoom admin |
 
 ## Development
 

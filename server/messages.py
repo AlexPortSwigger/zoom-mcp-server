@@ -92,3 +92,23 @@ async def list_pinned_messages(
     )
 
 
+async def list_bookmarks(oauth_handler) -> List[Dict[str, Any]]:
+    headers = oauth_handler.get_auth_headers()
+    return await paginate_all(
+        "GET",
+        f"{API_BASE}/chat/messages/bookmarks",
+        items_key="bookmarks",
+        headers=headers,
+    )
+
+
+async def list_mention_groups(
+    oauth_handler, channel_id: str
+) -> List[Dict[str, Any]]:
+    headers = oauth_handler.get_auth_headers()
+    return await paginate_all(
+        "GET",
+        f"{API_BASE}/chat/channels/{channel_id}/mention_groups",
+        items_key="mention_groups",
+        headers=headers,
+    )

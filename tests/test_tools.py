@@ -35,9 +35,9 @@ def cache(tmp_path):
     return CacheStore(tmp_path / "cache.db")
 
 
-def test_list_tools_returns_20(authed_oauth, cache):
+def test_list_tools_returns_25(authed_oauth, cache):
     tools = ZoomTools(authed_oauth, cache).list_tools()
-    assert len(tools) == 20
+    assert len(tools) == 25
     assert all(hasattr(t, "name") for t in tools)
     assert all(hasattr(t, "description") for t in tools)
 
@@ -64,7 +64,7 @@ async def test_call_tool_unknown_returns_error(authed_oauth, cache):
 
 @pytest.mark.asyncio
 async def test_call_tool_missing_required_arg(authed_oauth, cache):
-    out = await ZoomTools(authed_oauth, cache).call_tool("zoom_search_messages", {})
+    out = await ZoomTools(authed_oauth, cache).call_tool("zoom_search", {})
     assert "Missing required argument: query" in out[0]["text"]
 
 

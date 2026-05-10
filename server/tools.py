@@ -8,7 +8,15 @@ from typing import Any, Dict, List
 
 from mcp.types import Tool
 
-from . import messages, search, shared_spaces, summaries, transcripts
+from . import (
+    ai_companion,
+    files,
+    messages,
+    search,
+    shared_spaces,
+    summaries,
+    transcripts,
+)
 from .cache.store import CacheStore
 from .dispatcher import paginate_all
 from .endpoints import API_BASE, ENDPOINTS, endpoint_by_name
@@ -164,6 +172,29 @@ class ZoomTools:
                 "message": f"No match for {query!r} in cache.",
             }
         )
+
+    # ---- AI Companion ----
+
+    async def _h_ai_companion_search(self, args):
+        out = await ai_companion.search(
+            self.oauth,
+            query=args["query"],
+            scope=args.get("scope"),
+            from_date=args.get("from_date"),
+            to_date=args.get("to_date"),
+            max_results=int(args.get("max_results", 50)),
+        )
+        return _json(out)
+
+    async def _h_ai_companion_ask(self, args):
+        out = await ai_companion.ask(
+            self.oauth,
+            question=args["question"],
+            scope=args.get("scope"),
+            from_date=args.get("from_date"),
+            to_date=args.get("to_date"),
+        )
+        return _json(out)
 
     # ---- Cross-channel search (manual fan-out) ----
 
@@ -358,7 +389,13 @@ class ZoomTools:
         )
         return _json(out)
 
-    # ---- pinned messages (unverified — may 404) ----
+    # ---- files ----
+
+    async def _h_get_file(self, args):
+        out = await files.get_file(self.oauth, args["file_id"])
+        return _json(out)
+
+    # ---- pinned, bookmarks, mention groups ----
 
     async def _h_list_pinned_messages(self, args):
         channel_id = await self._resolve_channel_id(args["channel"])
@@ -366,6 +403,24 @@ class ZoomTools:
             return _err(f"Unknown channel: {args['channel']!r}")
         items = await messages.list_pinned_messages(self.oauth, channel_id)
         return _json({"messages": items, "count": len(items)})
+
+    async def _h_list_bookmarks(self, args):
+        items = await messages.list_bookmarks(self.oauth)
+        return _json({"bookmarks": items, "count": len(items)})
+
+    async def _h_list_mention_groups(self, args):
+        channel_id = await self._resolve_channel_id(args["channel"])
+        if not channel_id:
+            return _err(f"Unknown channel: {args['channel']!r}")
+        items = await messages.list_mention_groups(self.oauth, channel_id)
+        self.cache.put_mention_groups(channel_id, items)
+        return _json(
+            {
+                "channel_id": channel_id,
+                "mention_groups": items,
+                "count": len(items),
+            }
+        )
 
     # ---- shared spaces ----
 
