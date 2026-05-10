@@ -186,7 +186,7 @@ async def test_make_authenticated_request_passes_bearer(
 
 @pytest.mark.asyncio
 async def test_make_authenticated_request_raises_when_no_session(oauth):
-    with pytest.raises(RuntimeError, match="zoom_authenticate"):
+    with pytest.raises(RuntimeError, match="zoom_auth_login"):
         await oauth.make_authenticated_request(
             "GET", "https://api.zoom.us/v2/something"
         )

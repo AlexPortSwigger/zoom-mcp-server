@@ -86,7 +86,7 @@ def test_endpoint_by_name_lookup():
     from server.endpoints import endpoint_by_name
 
     # AI Companion search
-    assert endpoint_by_name("zoom_search")["handler"] == "ai_companion_search"
+    assert endpoint_by_name("zoom_search_ai")["handler"] == "ai_companion_search"
     # Manual fan-out fallback
     assert endpoint_by_name("zoom_search_messages")["handler"] == "search_messages"
 

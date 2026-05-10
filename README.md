@@ -13,24 +13,39 @@ Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config b
 
 The MCPB has the PortSwigger Zoom dev app's **public client ID** baked in, and uses **PKCE** (RFC 7636) — no client secret anywhere.
 
-## What's available (25 tools)
+## What's available (25 tools, 5 groups)
 
-| Category | Tools |
-|---|---|
-| **Auth** | `zoom_authenticate`, `zoom_revoke_authentication` |
-| **Info & resolve** | `zoom_get_my_info`, `zoom_resolve` |
-| **AI Companion** | `zoom_search` (cross-source search), `zoom_ask` (grounded Q&A with citations) |
-| **Manual cross-channel search** | `zoom_search_messages` (parallel fan-out fallback / exact-substring queries) |
-| **Channels** | `zoom_list_channels` (with starred filter), `zoom_list_channel_members`, `zoom_list_contacts` |
-| **Messages** | `zoom_get_channel_history`, `zoom_get_thread`, `zoom_get_message`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_mention_groups` |
-| **Files** | `zoom_get_file` (text content for text/code MIME types) |
-| **Shared spaces** | `zoom_list_shared_spaces`, `zoom_get_shared_space` |
-| **Meetings** | `zoom_list_meetings`, `zoom_get_meeting`, `zoom_list_recordings`, `zoom_get_meeting_transcript` |
-| **AI meeting summaries** | `zoom_list_meeting_summaries`, `zoom_get_meeting_summary` |
+Tools share group prefixes so they alphabetise into tidy sections in any client that sorts by name:
 
-`zoom_search` and `zoom_ask` use Zoom AI Companion to search and answer questions across Zoom Meetings, Chat, and Docs in a single call with grounded citations. `zoom_search_messages` is the manual fan-out fallback for queries where you want raw substring matching across channels and DMs.
+**`zoom_auth_*` — authentication & profile**
+- `zoom_auth_login` — start the OAuth flow
+- `zoom_auth_logout` — wipe local session
+- `zoom_auth_resolve` — name/email → ID
+- `zoom_auth_whoami` — authenticated user's profile
 
-Attachments and emoji reactions appear inline on every message returned by the message tools.
+**`zoom_chat_*` — channels, contacts, shared spaces**
+- `zoom_chat_channels` (with `starred_only` filter)
+- `zoom_chat_channel_members`
+- `zoom_chat_contacts`
+- `zoom_chat_shared_spaces`
+- `zoom_chat_shared_space_get`
+
+**`zoom_meeting_*` — meetings, recordings, transcripts, AI summaries**
+- `zoom_meeting_list`, `zoom_meeting_get`
+- `zoom_meeting_recordings`, `zoom_meeting_transcript`
+- `zoom_meeting_summary_list`, `zoom_meeting_summary_get`
+
+**`zoom_message_*` — messages, threads, files, pinned, bookmarks, mentions**
+- `zoom_message_history` — auto-paginated channel/DM history with reactions + attachment metadata inline
+- `zoom_message_thread`, `zoom_message_get`, `zoom_message_file`
+- `zoom_message_pinned`, `zoom_message_bookmarks`, `zoom_message_mentions`
+
+**`zoom_search_*` — AI Companion + manual fan-out**
+- `zoom_search_ai` — AI Companion cross-source search
+- `zoom_search_ask` — AI Companion grounded Q&A with citations
+- `zoom_search_messages` — manual parallel fan-out (substring fallback)
+
+Attachments and emoji reactions appear inline on every message returned by the `zoom_message_*` tools.
 
 ## How auth works
 
