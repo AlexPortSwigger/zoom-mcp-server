@@ -330,18 +330,10 @@ async def main() -> int:
         except Exception as e:
             audit.failed("zoom_meeting_get", str(e)[:200])
 
-    try:
-        sumlist = await summaries.list_meeting_summaries(
-            oauth, from_date="2026-04-10", to_date="2026-05-10",
-        )
-        audit.passed("zoom_meeting_summary_list",
-                     f"{len(sumlist)} summaries")
-        if sumlist:
-            sample_uuid_with_summary = (
-                sumlist[0].get("meeting_uuid") or sumlist[0].get("meeting_id")
-            )
-    except Exception as e:
-        audit.failed("zoom_meeting_summary_list", str(e)[:300])
+    # zoom_meeting_summary_list intentionally NOT exposed by this
+    # connector — Zoom requires a :admin scope only available to
+    # Server-to-Server OAuth apps. Skipped here to keep the audit
+    # tracking exactly what the connector ships.
 
     # meeting_summary_get: an endpoint-OK response is either 200 (with a
     # summary) or 404 with code 3001 ("meeting does not exist" — i.e. no

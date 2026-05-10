@@ -140,10 +140,10 @@ async def test_paginate_all_respects_max_items(httpx_mock):
     assert items == [1, 2, 3]
 
 
-def test_endpoints_table_has_22_tools():
+def test_endpoints_table_has_21_tools():
     from server.endpoints import ENDPOINTS
 
-    assert len(ENDPOINTS) == 22
+    assert len(ENDPOINTS) == 21
 
 
 def test_endpoints_have_unique_names():
@@ -175,9 +175,9 @@ def test_endpoint_by_name_raises_keyerror():
 
 
 def test_dead_endpoints_are_not_registered():
-    """v2.2.5: tools whose Zoom REST URLs don't exist publicly must NOT
-    be registered. Adding them back without proof Zoom shipped the
-    endpoint will fail this test."""
+    """v2.2.6: tools that cannot work on this connector's User-managed
+    PKCE OAuth app must NOT be registered. Adding them back without
+    a real fix will fail this test."""
     from server.endpoints import ENDPOINTS
 
     names = {e["name"] for e in ENDPOINTS}
@@ -190,4 +190,9 @@ def test_dead_endpoints_are_not_registered():
     assert "zoom_message_mentions" not in names, (
         "/chat/channels/{id}/mention_groups returns code 2300 ('endpoint "
         "not recognized') for every URL variant."
+    )
+    assert "zoom_meeting_summary_list" not in names, (
+        "Zoom requires meeting:read:list_summaries:admin which is exposed "
+        "only to Server-to-Server OAuth apps. Workaround: iterate "
+        "zoom_meeting_list + zoom_meeting_summary_get."
     )

@@ -208,14 +208,6 @@ class ZoomTools:
 
     # ---- Meeting summaries (real AI Companion APIs) ----
 
-    async def _h_list_meeting_summaries(self, args):
-        items = await summaries.list_meeting_summaries(
-            self.oauth,
-            from_date=args.get("from_date"),
-            to_date=args.get("to_date"),
-        )
-        return _json({"summaries": items, "count": len(items)})
-
     async def _h_get_meeting_summary(self, args):
         out = await summaries.get_meeting_summary(self.oauth, args["meeting_id"])
         return _json(out)
@@ -549,8 +541,12 @@ _LEGACY_TOOL_ALIASES: Dict[str, str] = {
     "zoom_get_meeting":             "zoom_meeting_get",
     "zoom_list_recordings":         "zoom_meeting_recordings",
     "zoom_get_meeting_transcript":  "zoom_meeting_transcript",
-    "zoom_list_meeting_summaries":  "zoom_meeting_summary_list",
     "zoom_get_meeting_summary":     "zoom_meeting_summary_get",
+    # zoom_list_meeting_summaries / zoom_meeting_summary_list intentionally
+    # NOT mapped — Zoom requires meeting:read:list_summaries:admin which
+    # is exposed only to Server-to-Server OAuth apps, not the
+    # User-managed PKCE app this connector uses. Use zoom_meeting_list +
+    # zoom_meeting_summary_get loop as the workaround.
     # messages, threads, files, etc.
     "zoom_get_channel_history":  "zoom_message_history",
     "zoom_get_thread":           "zoom_message_thread",
