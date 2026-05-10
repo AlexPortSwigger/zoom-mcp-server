@@ -113,6 +113,40 @@ class ZoomOAuthHandler:
             return await self.refresh_access_token()
         return False
 
+    async def maybe_auth_on_startup(self) -> None:
+        """Trigger the browser auth flow eagerly if there's no usable session.
+
+        Intended to be fired as a background task at server startup so that
+        first-time users see the OAuth window pop up immediately on install,
+        rather than only when Claude later calls a tool that needs auth.
+
+        Skips silently when:
+          - A valid (non-expired) token already exists.
+          - A refresh token exists (refresh happens lazily on the first
+            authenticated request).
+
+        Failures (port conflict, user closes window, timeout) are logged but
+        never crash the server — the user can still run zoom_authenticate
+        manually afterwards.
+        """
+        data = self.token_store.load()
+        if data and data.get("refresh_token"):
+            return
+        if not self.token_store.is_expired():
+            return
+        self.logger.info(
+            "No Zoom session on startup; launching browser auth flow"
+        )
+        try:
+            ok = await self.run_browser_flow()
+            if not ok:
+                self.logger.warning(
+                    "Startup auth flow did not complete; user can run "
+                    "zoom_authenticate manually."
+                )
+        except Exception as e:
+            self.logger.error("Startup auth flow error: %s", e)
+
     async def refresh_access_token(self) -> bool:
         data = self.token_store.load()
         if not data or not data.get("refresh_token"):

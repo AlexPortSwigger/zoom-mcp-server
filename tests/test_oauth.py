@@ -190,3 +190,62 @@ async def test_make_authenticated_request_raises_when_no_session(oauth):
         await oauth.make_authenticated_request(
             "GET", "https://api.zoom.us/v2/something"
         )
+
+
+# ---------- maybe_auth_on_startup ----------
+
+
+@pytest.mark.asyncio
+async def test_maybe_auth_skips_when_token_valid(oauth, store):
+    """If there's a non-expired token, skip — don't open browser."""
+    store.save("AT", "RT", datetime.now() + timedelta(hours=1))
+    called = {"browser": False}
+
+    async def _fake_browser_flow(*a, **kw):
+        called["browser"] = True
+        return True
+
+    oauth.run_browser_flow = _fake_browser_flow
+    await oauth.maybe_auth_on_startup()
+    assert called["browser"] is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_auth_skips_when_refresh_token_exists(oauth, store):
+    """Refresh token exists → defer to lazy refresh; don't open browser."""
+    store.save("OLD", "REFRESH", datetime.now() - timedelta(minutes=10))
+    called = {"browser": False}
+
+    async def _fake_browser_flow(*a, **kw):
+        called["browser"] = True
+        return True
+
+    oauth.run_browser_flow = _fake_browser_flow
+    await oauth.maybe_auth_on_startup()
+    assert called["browser"] is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_auth_runs_browser_when_no_session(oauth):
+    """No tokens at all → browser flow fires."""
+    called = {"browser": False}
+
+    async def _fake_browser_flow(*a, **kw):
+        called["browser"] = True
+        return True
+
+    oauth.run_browser_flow = _fake_browser_flow
+    await oauth.maybe_auth_on_startup()
+    assert called["browser"] is True
+
+
+@pytest.mark.asyncio
+async def test_maybe_auth_swallows_browser_failure(oauth):
+    """Browser flow failure must not crash server startup."""
+
+    async def _failing_browser_flow(*a, **kw):
+        raise RuntimeError("port in use")
+
+    oauth.run_browser_flow = _failing_browser_flow
+    # Must not raise
+    await oauth.maybe_auth_on_startup()
