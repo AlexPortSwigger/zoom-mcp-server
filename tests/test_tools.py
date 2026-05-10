@@ -26,7 +26,7 @@ def authed_oauth(tmp_path):
     return ZoomOAuthHandler(
         client_id="CID",
         token_store=store,
-        redirect_uri="http://localhost:8000/oauth/callback",
+        redirect_uri="http://localhost:53682/oauth/callback",
     )
 
 

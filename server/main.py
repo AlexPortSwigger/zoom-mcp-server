@@ -96,7 +96,10 @@ def get_required_env(name: str) -> str:
 # Defaults bake in PortSwigger's Zoom dev app + Public Client OAuth (PKCE).
 # Dev apps allow http://localhost callbacks; public client ID means no secret.
 DEFAULT_CLIENT_ID = "EIQOYZ5wQBCSQk3a48lT6A"
-DEFAULT_REDIRECT_URI = "http://localhost:8000/oauth/callback"
+# Port 53682: IANA dynamic range, matches gcloud SDK's OAuth callback
+# port (proven low-conflict). Migrated from 8000 in v2.2.7 to avoid
+# collision with common dev servers (jupyter/django/http.server).
+DEFAULT_REDIRECT_URI = "http://localhost:53682/oauth/callback"
 
 
 async def run() -> None:

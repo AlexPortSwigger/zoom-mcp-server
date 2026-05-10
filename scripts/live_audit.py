@@ -88,7 +88,7 @@ async def main() -> int:
     oauth = ZoomOAuthHandler(
         client_id="EIQOYZ5wQBCSQk3a48lT6A",
         token_store=store,
-        redirect_uri="http://localhost:8000/oauth/callback",
+        redirect_uri="http://localhost:53682/oauth/callback",
     )
     cache = CacheStore(cache_db_file())
 

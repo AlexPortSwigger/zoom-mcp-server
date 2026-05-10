@@ -95,7 +95,7 @@ Tool names share group prefixes (`zoom_auth_*`, `zoom_chat_*`, `zoom_meeting_*`,
 ```
 Claude → Browser → zoom.us/oauth/authorize?code_challenge=… → user clicks Allow
                                                      ↓
-                             http://localhost:8000/oauth/callback ←  MCPB local listener
+                             http://localhost:53682/oauth/callback ←  MCPB local listener
                                                      ↓
                              zoom.us/oauth/token  (code + verifier; NO secret)
                                                      ↓
@@ -169,7 +169,7 @@ After adding scopes in [marketplace.zoom.us](https://marketplace.zoom.us/develop
 To use this with a different Zoom app:
 
 1. Create a Zoom Marketplace app, enable **Use Public Client OAuth**, copy the **Public Client ID**
-2. Set OAuth redirect to `http://localhost:8000/oauth/callback` (dev app) or your HTTPS callback (production)
+2. Set OAuth redirect to `http://localhost:53682/oauth/callback` (dev app) or your HTTPS callback (production)
 3. Edit `server/main.py` → change `DEFAULT_CLIENT_ID` and `DEFAULT_REDIRECT_URI`, OR pass them via `mcp_config.env` in `manifest.json`
 4. Rebuild: `./scripts/build_mcpb.sh --all`
 
@@ -177,9 +177,12 @@ To use this with a different Zoom app:
 
 | Problem | Fix |
 |---|---|
-| "Port 8000 already in use" | `lsof -i :8000`; kill the conflicting process; re-run `zoom_auth_login` |
+| Browser says "this site can't be reached" at `localhost:53682` after Zoom auth | v2.2.7+ binds dual-stack on `127.0.0.1` and `::1` to fix this. If still broken, check `~/Library/Logs/zoom-mcp/zoom-mcp.log` for the bind line. The auth URL is also logged so you can paste it into a browser manually. |
+| "All candidate OAuth ports busy: [53682]" | Find what's holding it: `lsof -nP -iTCP:53682 -sTCP:LISTEN`. Kill or move the conflicting service (gcloud SDK uses this port too — `gcloud auth revoke` if it's that). |
 | Auth window closed without authorising | Re-run `zoom_auth_login` |
 | Tokens expired and refresh fails | `zoom_auth_logout`, then `zoom_auth_login` |
+| Browser doesn't pop up at all | The auth URL is logged at INFO level — copy it from `~/Library/Logs/zoom-mcp/zoom-mcp.log` and paste manually. |
+| Connection timeout / firewall blocks Python | macOS System Settings → Network → Firewall → allow incoming connections to your Python binary. Or disable firewall briefly to test. |
 | `HTTP 400 (Zoom code 4711)` on a tool | Zoom OAuth app missing a scope. The error message names exactly which one. Add it in [marketplace.zoom.us](https://marketplace.zoom.us/develop/apps), then `zoom_auth_logout` + `zoom_auth_login`. |
 | `zoom_search_messages` returns 0 hits when you expect matches | Zoom caps search windows to ~24h server-side. For older content, use `zoom_message_history` with a date range instead. |
 
