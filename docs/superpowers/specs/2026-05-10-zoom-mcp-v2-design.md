@@ -9,7 +9,7 @@
 
 ## 1. Goals
 
-1. **Reliable cross-channel message search** — the v1 endpoint requires per-channel scoping; this is the primary user pain point.
+1. **AI-Companion-powered search and Q&A** — `zoom_search` and `zoom_ask` use Zoom's AI Companion endpoints to search and answer questions across Meetings/Chat/Docs in a single call with grounded citations. Replaces the originally planned manual fan-out.
 2. **Easy meeting transcript retrieval** — pull transcripts for past meetings on demand, ready for summarisation.
 3. **Easy onboarding** — single-file MCPB install for both Claude Code and Claude Desktop. No bash wrappers, no `setup.sh`, no `~/.claude.json` editing.
 4. **Read-only by design** — no write/admin tools; minimum-necessary OAuth scopes; reduces consent friction and blast radius.
@@ -20,7 +20,8 @@
 - Sending messages, reactions, edits, deletes
 - Channel/contact/membership administration
 - Real-time updates via webhooks (deferred; would require x-zm-signature handling)
-- A local full-text index of every message (deferred; live parallel search is sufficient at expected scale)
+- A local full-text index of every message (deferred; AI Companion search supersedes the original need)
+- Manual parallel-fan-out cross-channel search (replaced by AI Companion search; revisit only if AI Companion proves insufficient for specific query types like exact-substring or regex)
 - Backwards compatibility with v1 token storage or v1 setup paths
 
 ## 3. Architecture Overview
@@ -38,8 +39,8 @@
 │  └─┬───────────────────┬───────────────────┬──────────────┘ │
 │    │                   │                   │                │
 │  ┌─▼──────────┐  ┌─────▼──────┐  ┌────────▼───────┐         │
-│  │ endpoints/ │  │  search.py │  │  transcripts.py │         │
-│  │ dispatcher │  │  (fanout)  │  │  (VTT parser)   │         │
+│  │ endpoints/ │  │ ai_compan. │  │  transcripts.py │         │
+│  │ dispatcher │  │ search/ask │  │  (VTT parser)   │         │
 │  └─┬──────────┘  └────┬───────┘  └────────┬───────┘         │
 │    │                  │                   │                  │
 │  ┌─▼──────────────────▼───────────────────▼────────────────┐ │
@@ -69,7 +70,7 @@ zoom-mcp-server/
 │   ├── main.py                    # Entry point — replaces v1 zoom_server.py
 │   ├── endpoints.py               # Declarative ENDPOINTS route table (chat + meetings)
 │   ├── dispatcher.py              # Generic API dispatch + auto-pagination helper
-│   ├── search.py                  # Cross-channel search (parallel fan-out)
+│   ├── ai_companion.py            # zoom_search & zoom_ask (AI Companion endpoints)
 │   ├── transcripts.py             # Recording manifest fetch + VTT parser
 │   ├── tools.py                   # Tool registration / call_tool routing
 │   ├── http_client.py             # Single shared httpx client + retry wrapper
@@ -86,7 +87,7 @@ zoom-mcp-server/
 ├── tests/
 │   ├── test_cache.py
 │   ├── test_dispatcher.py
-│   ├── test_search.py
+│   ├── test_ai_companion.py
 │   ├── test_transcripts.py
 │   ├── test_paths.py
 │   └── test_log_filter.py
@@ -96,7 +97,7 @@ zoom-mcp-server/
 └── (NO setup.sh, zoom_wrapper.sh, .env.example, base_mcp_server.py at root)
 ```
 
-## 5. Tool Surface (read-only, 14 tools)
+## 5. Tool Surface (read-only, 16 tools)
 
 | Tool | Purpose | Cached? |
 |---|---|---|
@@ -104,11 +105,13 @@ zoom-mcp-server/
 | `zoom_revoke_authentication` | Wipe tokens, cache, logs | — |
 | `zoom_get_my_info` | Authenticated user info | yes (in-memory only, 24h) |
 | `zoom_resolve` | Resolve name/email to channel/contact/user ID | cache-backed |
+| `zoom_search` | **AI Companion search** across Meetings/Chat/Docs; ranked, contextual results | always live |
+| `zoom_ask` | **AI Companion grounded Q&A** — answers a question with citations from Meetings/Chat/Docs | always live |
 | `zoom_list_channels` | Cache-first list of channels user belongs to | yes (1h) |
 | `zoom_list_contacts` | Cache-first contacts list | yes (24h) |
 | `zoom_list_channel_members` | Members of a channel | yes (1h) |
-| `zoom_get_channel_history` | Auto-paginated message history; takes name or ID; date range; max_messages | always live |
-| `zoom_search_all_messages` | Cross-channel search with parallel fan-out | always live |
+| `zoom_get_channel_history` | Auto-paginated raw message history; takes name or ID; date range; max_messages | always live |
+| `zoom_get_thread` | Messages under a thread (parent message ID + scope) | always live |
 | `zoom_list_pinned_messages` | Pinned messages in a channel | yes (5min) |
 | `zoom_list_bookmarks` | User's bookmarked messages | yes (5min) |
 | `zoom_list_meetings` | Past + upcoming meetings; filter by date/topic/participant | metadata cached |
@@ -121,7 +124,9 @@ All tools accept human-friendly identifiers where possible:
 - `channel`: name OR ID (resolved via cache)
 - `contact`: email OR ID
 - Date arguments: ISO-8601 strings
-- Cache-backed list tools (`zoom_list_channels`, `zoom_list_contacts`, `zoom_list_channel_members`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_meetings`) accept `force_refresh: bool = false` to bypass cache. Live-only tools (`zoom_get_channel_history`, `zoom_search_all_messages`, `zoom_get_meeting_transcript`) do not.
+- Cache-backed list tools (`zoom_list_channels`, `zoom_list_contacts`, `zoom_list_channel_members`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_meetings`) accept `force_refresh: bool = false` to bypass cache. Live-only tools (`zoom_search`, `zoom_ask`, `zoom_get_channel_history`, `zoom_get_thread`, `zoom_get_meeting_transcript`) do not.
+
+`zoom_search` and `zoom_ask` accept an optional `scope` argument: `"chat" | "meetings" | "docs" | "all"` (default `"all"`), and an optional `from_date` / `to_date`.
 
 ## 6. Cache Schema (SQLite)
 
@@ -236,69 +241,59 @@ zoom-mcp/
 
 **Nothing is ever written inside the MCPB bundle.** The bundle is read-only after install.
 
-## 8. Cross-Channel Search (`zoom_search_all_messages`)
+## 8. Search and Q&A via AI Companion
 
-### 8.1 Algorithm
+Both `zoom_search` and `zoom_ask` are thin wrappers around Zoom AI Companion endpoints (`ai_companion:read:search` and `ai_companion:read:ask`). This replaces the originally planned manual parallel fan-out — Zoom's server-side ranking is better, faster, and works across Meetings/Chat/Docs in one call.
+
+### 8.1 `zoom_search`
 
 ```
-async def search_all_messages(query, from_date=None, to_date=None,
-                              channel_filter=None, max_results=100):
-    channels = await cache.get_channels(refresh_if_stale=True)
-    contacts = await cache.get_contacts(refresh_if_stale=True)
-
-    if channel_filter:
-        channels = [c for c in channels if matches(c.name, channel_filter)]
-
-    sem = asyncio.Semaphore(20)
-    tasks = []
-
-    for c in channels:
-        tasks.append(_search_one(sem, to_channel=c.id, query=query,
-                                 from_date=from_date, to_date=to_date))
-    for ct in contacts:
-        tasks.append(_search_one(sem, to_contact=ct.id, query=query,
-                                 from_date=from_date, to_date=to_date))
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    merged = []
-    errors = 0
-    for r in results:
-        if isinstance(r, Exception):
-            errors += 1
-            continue
-        merged.extend(r)
-
-    merged.sort(key=lambda m: m["timestamp"], reverse=True)
-    return {
-        "results": merged[:max_results],
-        "total_found": len(merged),
-        "scopes_searched": len(tasks),
-        "scopes_errored": errors,
-    }
+zoom_search(query, scope="all", from_date=None, to_date=None, max_results=50)
+  ↓
+POST /ai_companion/search   (single API call)
+  body: { "query": ..., "sources": [...], "from": ..., "to": ..., "limit": ... }
+  ↓
+Returns: [{source_type, source_id, title/topic, snippet, timestamp, relevance, deeplink}]
 ```
 
-### 8.2 Per-call retry policy
+`scope` maps to AI Companion `sources` parameter:
+- `"chat"`     → `["team_chat"]`
+- `"meetings"` → `["meeting"]`
+- `"docs"`     → `["zoom_doc"]`
+- `"all"`      → `["team_chat", "meeting", "zoom_doc"]`
 
-Inherits from `http_client.py` unified policy (see Section 11).
+### 8.2 `zoom_ask`
 
-### 8.3 Performance budget
+```
+zoom_ask(question, scope="all", from_date=None, to_date=None)
+  ↓
+POST /ai_companion/ask
+  body: { "question": ..., "sources": [...], "from": ..., "to": ... }
+  ↓
+Returns: { "answer": "...", "citations": [{source_type, source_id, title, snippet, deeplink}, ...] }
+```
 
-| Channel count | Expected wall-time |
+The model-generated answer is returned verbatim; citations let Claude (or the user) drill into specific messages or meeting transcripts via `zoom_get_message`, `zoom_get_thread`, or `zoom_get_meeting_transcript`.
+
+### 8.3 Performance & rate limits
+
+Single API call replaces N parallel calls. Wall-time per query: ~1-3s including AI Companion processing. No per-channel concurrency tuning needed.
+
+If AI Companion endpoints return 429 (organisation rate limit) or 503, the unified retry policy in §11 applies.
+
+### 8.4 Failure modes
+
+| Condition | Behaviour |
 |---|---|
-| 50  | ~1.5s |
-| 200 | ~3s   |
-| 500 | ~7s   |
+| AI Companion not enabled for the user/org | 403 from endpoint → return error message: "AI Companion is not enabled for this account. Ask your Zoom admin to enable it." |
+| Empty query | Reject with clear error |
+| `from_date > to_date` | Reject with clear error |
+| 5xx / network error | Retry per §11 |
+| 429 with Retry-After | Sleep and retry |
 
-Concurrency is `Semaphore(20)`; the 80-req/sec Zoom rate limit is the bottleneck above ~400 channels.
+### 8.5 Why not also keep manual fan-out as a fallback
 
-### 8.4 Edge cases
-
-- Empty `query` → reject with clear error.
-- Stale or empty cache → refresh first.
-- Per-call timeout (10s connect / 30s total) → counts as error, search continues.
-- Some channels may return 403 (private, no access); logged and skipped.
-- First page only per scope (50 results max); user can drill into a specific channel via `zoom_get_channel_history` for more depth.
+YAGNI. If AI Companion proves insufficient for a use case (e.g. exact-substring search, regex), we add a `zoom_search_classic` tool in v2.1. v2.0 ships AI Companion only.
 
 ## 9. Meeting Transcript Retrieval (`zoom_get_meeting_transcript`)
 
@@ -375,20 +370,68 @@ Retry wrapper applied to every Zoom API call:
 
 OAuth-authenticated requests (currently bypass v1 retry logic at `utils/oauth_handler.py:294`) MUST go through this wrapper in v2.
 
-## 12. OAuth Scopes (read-only minimum)
+## 12. OAuth Scopes (granular, read-only minimum)
 
+The Zoom Marketplace app for v2 requests the following 20 granular scopes:
+
+**AI Companion** (powers `zoom_search`, `zoom_ask`):
 ```
-chat_message:read
-chat_channel:read
-chat_contact:read   (or contact:read if marketplace requires)
-user:read
-cloud_recording:read
-meeting:read
+ai_companion:read:ask
+ai_companion:read:search
 ```
 
-Removed from v1: `chat_message:write`, `chat_channel:write`.
+**Contacts:**
+```
+contact:read:list_contacts
+```
 
-The README and the MCPB `long_description` will explicitly list these scopes so the user can copy them into their Zoom Marketplace app config.
+**Meetings:**
+```
+meeting:read:meeting
+```
+
+**Recordings & transcripts:**
+```
+cloud_recording:read:list_user_recordings
+cloud_recording:read:list_recording_files
+cloud_recording:read:recording
+cloud_recording:read:meeting_transcript
+cloud_recording:read:content
+```
+
+**Team Chat (read-only):**
+```
+team_chat:read:channel
+team_chat:read:list_user_channels
+team_chat:read:list_members
+team_chat:read:list_user_messages
+team_chat:read:user_message
+team_chat:read:thread_message
+team_chat:read:list_pinned_messages
+team_chat:read:list_bookmarks
+team_chat:read:list_contacts
+team_chat:read:contact
+```
+
+**User:**
+```
+user:read:user
+```
+
+### 12.1 Scopes deliberately NOT requested
+
+| Category | Why excluded |
+|---|---|
+| All `team_chat:write:*` and `team_chat:update:*` | Read-only design |
+| `imchat:userapp` | Not building an in-client app |
+| All `meeting:read:meeting_audio/video/chat/screenshare/transcript` | Real-time meeting integrations are out of scope; we use cloud-recording transcripts instead |
+| `cloud_recording:read:recording_settings` | Recording settings not surfaced |
+| `team_chat:read:shared_space*` (4 scopes) | Shared spaces dropped from v2 |
+| `team_chat:read:file` | Attachment fetching not in v2 |
+| `team_chat:read:invite_link`, `:list_invitations`, `:list_approvals`, `:list_reminders`, `:list_scheduled_messages` | Admin/personal-state features out of scope |
+| `team_chat:read:list_custom_emojis`, `:message_emoji`, `:chat_control`, `:archive_channels`, `:user_channel`, `:list_user_sessions`, `:mention_group` | Low value; can be added later as needed |
+
+The README and the MCPB `long_description` will list the requested scopes so the user can copy them when configuring their Zoom Marketplace app.
 
 ## 13. Security & Compliance
 
@@ -555,7 +598,7 @@ We considered: (a) single bundle with all platform wheels included, (b) install-
 | Unit | Retry wrapper | Mock httpx returning 429/5xx sequences |
 | Integration | OAuth flow | mock Zoom token endpoint via local httpx mock |
 | Integration | TLS minimum version | live call to api.zoom.us, assert TLSv1_2+ |
-| Integration | Cross-channel search | mocked Zoom API with N synthetic channels |
+| Integration | AI Companion search/ask | mocked Zoom AI Companion API; assert source-list mapping, citation parsing |
 | Smoke (manual) | End-to-end MCPB install on macOS, Linux, Windows | manual test plan in `docs/release-checklist.md` |
 
 ## 17. Migration from v1
