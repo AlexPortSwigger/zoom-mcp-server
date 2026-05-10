@@ -1,154 +1,112 @@
-# Zoom Team Chat MCP Server
+# Zoom MCP Server v2
 
-An MCP server that gives Claude Code full access to the Zoom Team Chat API - read messages, send messages, manage channels, search contacts, and more through natural conversation.
+Read-only MCP server for Zoom Team Chat and meeting transcripts. Distributed as a `.mcpb` bundle.
 
-## Setup (2 minutes)
+## What's available (22 tools)
 
-### Prerequisites
+| Category | Tools |
+|---|---|
+| **AI Companion** | `zoom_search`, `zoom_ask` |
+| **Auth & info** | `zoom_authenticate`, `zoom_revoke_authentication`, `zoom_get_my_info`, `zoom_resolve` |
+| **Channels** | `zoom_list_channels` (incl. starred filter), `zoom_list_channel_members`, `zoom_list_contacts` |
+| **Messages** | `zoom_get_channel_history`, `zoom_get_thread`, `zoom_get_message`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_mention_groups` |
+| **Files** | `zoom_get_file` (text content for text/code MIME types) |
+| **Shared spaces** | `zoom_list_shared_spaces`, `zoom_get_shared_space` |
+| **Meetings** | `zoom_list_meetings`, `zoom_get_meeting`, `zoom_list_recordings`, `zoom_get_meeting_transcript` |
 
-- Python 3.8+
-- A Zoom OAuth app (see below)
+`zoom_search` and `zoom_ask` use Zoom AI Companion to search and answer questions across Zoom Meetings, Chat, and Docs in a single call with grounded citations — replacing the older "search every channel manually" workflow.
 
-### Option A: Let Claude do it
+## Install (Claude Desktop)
 
-Start Claude Code anywhere and say:
+1. Set up a Zoom Marketplace OAuth app — see [Zoom OAuth setup](#zoom-oauth-setup).
+2. Download `zoom-mcp-<your-platform>.mcpb` from the [Releases page](#).
+3. Double-click the `.mcpb` file. Claude Desktop prompts for your Zoom Client ID and Secret.
+4. Restart Claude Desktop. The Zoom tools appear automatically.
 
-> Clone https://github.com/AlexPortSwigger/zoom-mcp-server and set it up
+## Install (Claude Code)
 
-Claude will read the CLAUDE.md, run the setup script, and walk you through providing your Zoom credentials. Restart Claude Code and you're done.
+```bash
+claude mcp install /path/to/zoom-mcp-<your-platform>.mcpb
+```
 
-### Option B: Manual setup
+## First use
+
+Ask Claude to "authenticate with Zoom". Your browser will open to authorize the app. Tokens are saved locally and refreshed automatically thereafter.
+
+## Zoom OAuth setup
+
+1. Go to https://marketplace.zoom.us/ → **Develop** → **Build App** → **General App**
+2. Set the redirect URL to: `http://localhost:8000/oauth/callback`
+3. Add these 28 read-only scopes:
+
+```
+ai_companion:read:ask
+ai_companion:read:search
+contact:read:list_contacts
+meeting:read:meeting
+cloud_recording:read:list_user_recordings
+cloud_recording:read:list_recording_files
+cloud_recording:read:recording
+cloud_recording:read:meeting_transcript
+cloud_recording:read:content
+team_chat:read:channel
+team_chat:read:user_channel
+team_chat:read:list_user_channels
+team_chat:read:list_members
+team_chat:read:list_user_messages
+team_chat:read:user_message
+team_chat:read:thread_message
+team_chat:read:message_emoji
+team_chat:read:list_pinned_messages
+team_chat:read:list_bookmarks
+team_chat:read:file
+team_chat:read:chat_control
+team_chat:read:mention_group
+team_chat:read:list_contacts
+team_chat:read:contact
+team_chat:read:shared_space
+team_chat:read:list_shared_spaces
+team_chat:read:list_shared_space_channels
+team_chat:read:list_shared_space_members
+user:read:user
+```
+
+4. Copy your **Client ID** and **Client Secret** into the `.mcpb` install prompt.
+
+## Security & data handling
+
+- **TLS 1.2+ enforced** on all Zoom traffic.
+- **OAuth tokens are Fernet-encrypted at rest** (AES-128-CBC + HMAC-SHA256) in:
+  - macOS: `~/Library/Application Support/zoom-mcp/`
+  - Linux: `${XDG_DATA_HOME:-~/.local/share}/zoom-mcp/`
+  - Windows: `%APPDATA%\zoom-mcp\`
+- **File mode `0600`** on all token and key files (Unix).
+- **SQLite metadata cache** stores channel/contact/meeting names and IDs only. **No message bodies, transcript content, or attachment data are ever written to disk.**
+- **Logs scrub** bearer tokens, refresh tokens, message bodies, transcript text, and email addresses (defence in depth).
+- **`zoom_revoke_authentication`** wipes tokens, cache, and in-memory state at any time.
+- **No webhooks** — pure outbound polling/request-response only, so x-zm-signature verification is N/A.
+
+## Development
 
 ```bash
 git clone https://github.com/AlexPortSwigger/zoom-mcp-server.git
 cd zoom-mcp-server
-chmod +x setup.sh zoom_wrapper.sh
-./setup.sh
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+
+# Run the test suite
+.venv/bin/pytest
+
+# Run the server from source (set ZOOM_CLIENT_ID + ZOOM_CLIENT_SECRET in .env)
+./scripts/dev-run.sh
+
+# Build .mcpb bundle for the host platform
+./scripts/build_mcpb.sh
+
+# Build .mcpb bundles for all four supported platforms (needs internet)
+./scripts/build_mcpb.sh --all
 ```
 
-The setup script will:
-1. Create a Python virtual environment and install dependencies
-2. Prompt you for your Zoom Client ID and Secret
-3. Register the server with Claude Code (`~/.claude.json`)
+## License
 
-Then restart Claude Code.
-
-### Creating a Zoom OAuth App
-
-If you don't already have one:
-
-1. Go to [marketplace.zoom.us](https://marketplace.zoom.us/) > **Develop** > **Build App** > **General App**
-2. Set the redirect URL to: `http://localhost:8000/oauth/callback`
-3. Add these scopes:
-   - `chat_message:read`, `chat_message:write`
-   - `chat_channel:read`, `chat_channel:write`
-   - `contact:read`, `user:read`
-4. Copy your **Client ID** and **Client Secret**
-
-### Option C: Claude Desktop App
-
-The Claude Desktop app uses a different config file and **cannot run bash wrapper scripts** (macOS blocks execution from cloud-synced directories). Instead, copy files locally and point to Python directly.
-
-1. **Copy server files to a local path:**
-   ```bash
-   mkdir -p ~/.zoom-mcp
-   cp zoom_server.py zoom_oauth_handler.py base_mcp_server.py requirements.txt ~/.zoom-mcp/
-   cp -r utils ~/.zoom-mcp/
-   ```
-
-2. **Create venv:**
-   ```bash
-   cd ~/.zoom-mcp
-   python3 -m venv .venv
-   .venv/bin/pip install -r requirements.txt
-   ```
-
-3. **Create `.env`:**
-   ```bash
-   cat > ~/.zoom-mcp/.env << 'EOF'
-   ZOOM_CLIENT_ID=your_client_id
-   ZOOM_CLIENT_SECRET=your_client_secret
-   ZOOM_REDIRECT_URI=http://localhost:8000/oauth/callback
-   EOF
-   ```
-
-4. **Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:**
-   ```json
-   {
-     "mcpServers": {
-       "zoom-integration": {
-         "command": "/Users/YOUR_USERNAME/.zoom-mcp/.venv/bin/python3",
-         "args": ["/Users/YOUR_USERNAME/.zoom-mcp/zoom_server.py"],
-         "env": {
-           "ZOOM_CLIENT_ID": "your_client_id",
-           "ZOOM_CLIENT_SECRET": "your_client_secret",
-           "ZOOM_REDIRECT_URI": "http://localhost:8000/oauth/callback"
-         }
-       }
-     }
-   }
-   ```
-
-5. **Restart Claude Desktop** (Cmd+Q then reopen — just closing the window isn't enough).
-
-### First Use
-
-After restarting Claude Code or Claude Desktop, the first time you use a Zoom tool it will open your browser to authorize with Zoom. This is a one-time step - tokens refresh automatically after that.
-
-## What you can do
-
-Once set up, ask Claude things like:
-
-- "List my Zoom channels"
-- "Show me recent messages in the #devs channel"
-- "Send a message to the team channel saying 'standup in 5 mins'"
-- "Search my messages for anything about Q2 planning"
-- "Who's in the engineering channel?"
-
-## Available Tools
-
-| Tool | Description |
-|------|-------------|
-| `zoom_list_channels` | List channels you belong to |
-| `zoom_list_messages` | Read messages from a channel or DM |
-| `zoom_send_message` | Send a message to a channel or contact |
-| `zoom_search_channels` | Search for channels by name |
-| `zoom_list_contacts` | List your Zoom contacts |
-| `zoom_list_channel_members` | See who's in a channel |
-| `zoom_get_channel` | Get channel details |
-| `zoom_get_contact` | Get contact details and presence |
-| `zoom_search_company_contacts` | Search contacts by name/email |
-| + 18 more | Reactions, bookmarks, pinned messages, shared spaces, etc. |
-
-## File Structure
-
-```
-zoom-mcp-server/
-├── CLAUDE.md              # Instructions for Claude Code (auto-setup)
-├── README.md              # This file
-├── setup.sh               # Automated setup script
-├── .env.example           # Template for credentials
-├── requirements.txt       # Python dependencies
-├── zoom_wrapper.sh        # Entry point (loads .env, activates venv)
-├── zoom_server.py         # Main server (27 Zoom API endpoints)
-├── zoom_oauth_handler.py  # Zoom OAuth implementation
-├── base_mcp_server.py     # Base MCP server class
-└── utils/                 # OAuth + token management utilities
-```
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| "Authentication required" | Ask Claude to "authenticate with Zoom" - opens browser |
-| Server won't start | Check `logs/zoom-integration.log` and verify `.env` |
-| OAuth callback fails | Check port 8000 is free; verify redirect URL in Zoom app |
-| SSL errors on macOS | Run `/Applications/Python\ 3.x/Install\ Certificates.command` |
-| Missing tools after setup | Restart Claude Code - MCP servers load at startup |
-
-## Security
-
-- Tokens encrypted at rest (Fernet)
-- Credentials in `.env` (gitignored)
-- File permissions locked to owner only (0o600)
-- Each user gets their own tokens via individual OAuth flow
+MIT
