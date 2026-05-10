@@ -2,6 +2,21 @@
 
 Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config beta** — no client secret to enter, no setup script. Distributed as a `.mcpb` bundle.
 
+## What works today
+
+| Area | Status |
+|---|---|
+| Auth (`zoom_auth_*`) | ✅ Works |
+| Chat browse (`zoom_chat_*`, `zoom_message_*`) | ✅ Works |
+| Chat search (`zoom_search_messages`) | ✅ Works (Zoom caps each search to ~24h regardless of `from`/`to`) |
+| Single meeting (`zoom_meeting_get`, `zoom_meeting_transcript`) | ✅ Works |
+| Recordings (`zoom_meeting_recordings`) | ✅ Works |
+| List meetings (`zoom_meeting_list`) | ⚠️ Needs `meeting:read:list_meetings` scope added in Zoom dev portal |
+| Meeting summaries (`zoom_meeting_summary_list`) | ⚠️ Needs `meeting:read:list_summaries:admin` scope added in Zoom dev portal |
+| AI Companion (`zoom_search_ai`, `zoom_search_ask`) | ❌ Zoom returns `code:2300 — endpoint not recognized`; these REST endpoints aren't exposed publicly. Use `zoom_search_messages` instead. |
+
+When a tool fails with a missing-scope error you'll see a single-line message like `HTTP 400 (Zoom code 4711): Zoom OAuth app missing scope. Required: [meeting:read:list_meetings]. Fix: a Zoom Marketplace admin must add the missing scope(s)…` — that tells you exactly what to add and where.
+
 ## Install for Swiggers (zero config)
 
 1. Download `zoom-mcp-<your-platform>.mcpb` from internal share
@@ -137,7 +152,8 @@ To use this with a different Zoom app:
 | "Port 8000 already in use" | `lsof -i :8000`; kill the conflicting process; re-run `zoom_authenticate` |
 | Auth window closed without authorising | Re-run `zoom_authenticate` |
 | Tokens expired and refresh fails | Run `zoom_revoke_authentication`, then `zoom_authenticate` |
-| AI Companion tools 403 | AI Companion not enabled on your account; ask your Zoom admin |
+| AI Companion tools 404 (`code:2300`) | The `/ai_companion/search` and `/ai_companion/ask` REST endpoints aren't exposed publicly by Zoom. Use `zoom_search_messages` for cross-chat search instead. |
+| `HTTP 400 (Zoom code 4711)` on a tool | Zoom OAuth app missing a scope. Add the named scope(s) in [marketplace.zoom.us](https://marketplace.zoom.us/develop/apps), then `zoom_auth_logout` + `zoom_auth_login` to refresh the token. |
 
 ## Development
 
