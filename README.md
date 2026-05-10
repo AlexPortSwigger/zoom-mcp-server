@@ -13,9 +13,15 @@ Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config b
 
 The MCPB has the PortSwigger Zoom dev app's **public client ID** baked in, and uses **PKCE** (RFC 7636) — no client secret anywhere.
 
-## What's available (25 tools, 5 groups)
+## What's available (25 tools)
 
-Tools share group prefixes so they alphabetise into tidy sections in any client that sorts by name:
+Each tool has standard MCP annotations, so Claude Desktop's connector-permissions screen groups them into:
+
+- **Read-only (23 tools)** — every Zoom API call we expose
+- **Write (1 tool)** — `zoom_auth_login` (saves OAuth tokens locally)
+- **Destructive (1 tool)** — `zoom_auth_logout` (wipes local tokens, cache, in-memory state)
+
+Within those buckets, tool names share group prefixes (`zoom_auth_*`, `zoom_chat_*`, `zoom_meeting_*`, `zoom_message_*`, `zoom_search_*`) so they alphabetise into tidy sub-sections in any client that sorts by name:
 
 **`zoom_auth_*` — authentication & profile**
 - `zoom_auth_login` — start the OAuth flow
