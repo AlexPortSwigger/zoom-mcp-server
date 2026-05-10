@@ -22,6 +22,20 @@ def _ca_bundle() -> Optional[str]:
         import certifi
         return certifi.where()
     except ImportError:
+        # Loud, not silent: this is the most common cause of TLS failures
+        # on macOS Python builds.
+        import logging
+        import sys
+        logging.getLogger("zoom-mcp").error(
+            "certifi could not be imported (Python %d.%d). SSL will fall "
+            "back to the system CA store, which is typically empty for "
+            "python.org/homebrew Python on macOS — Zoom TLS handshakes "
+            "will fail with CERTIFICATE_VERIFY_FAILED. Most likely cause: "
+            "the MCPB bundle does not include wheels for your Python "
+            "version. Rebuild with --include-py %d.%d or use python3.13.",
+            sys.version_info.major, sys.version_info.minor,
+            sys.version_info.major, sys.version_info.minor,
+        )
         return None
 
 
