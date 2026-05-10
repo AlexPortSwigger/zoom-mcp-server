@@ -56,6 +56,52 @@ def test_auth_tools_present(authed_oauth, cache):
     assert "zoom_auth_logout" in names
 
 
+def test_tool_annotations_group_correctly(authed_oauth, cache):
+    """Claude Desktop groups tools by readOnly/destructive hints."""
+    tools = ZoomTools(authed_oauth, cache).list_tools()
+    by_name = {t.name: t for t in tools}
+
+    # zoom_auth_logout: destructive (wipes local state)
+    logout_anns = by_name["zoom_auth_logout"].annotations
+    assert logout_anns.readOnlyHint is False
+    assert logout_anns.destructiveHint is True
+
+    # zoom_auth_login: writes (saves tokens) but not destructive
+    login_anns = by_name["zoom_auth_login"].annotations
+    assert login_anns.readOnlyHint is False
+    assert login_anns.destructiveHint is False
+
+    # Every other tool is read-only
+    for name, tool in by_name.items():
+        if name in ("zoom_auth_login", "zoom_auth_logout"):
+            continue
+        anns = tool.annotations
+        assert anns is not None, f"{name} missing annotations"
+        assert anns.readOnlyHint is True, f"{name} should be readOnlyHint=True"
+        assert anns.destructiveHint is False, (
+            f"{name} should be destructiveHint=False"
+        )
+
+
+def test_tool_annotations_split_into_three_groups(authed_oauth, cache):
+    """Confirm exact bucket counts: 23 read-only, 1 write, 1 destructive."""
+    tools = ZoomTools(authed_oauth, cache).list_tools()
+    read_only = [t for t in tools if t.annotations.readOnlyHint is True]
+    write = [
+        t for t in tools
+        if t.annotations.readOnlyHint is False
+        and t.annotations.destructiveHint is False
+    ]
+    destructive = [
+        t for t in tools if t.annotations.destructiveHint is True
+    ]
+    assert len(read_only) == 23
+    assert len(write) == 1
+    assert len(destructive) == 1
+    assert write[0].name == "zoom_auth_login"
+    assert destructive[0].name == "zoom_auth_logout"
+
+
 @pytest.mark.asyncio
 async def test_call_tool_unknown_returns_error(authed_oauth, cache):
     out = await ZoomTools(authed_oauth, cache).call_tool("zoom_nope", {})
