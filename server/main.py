@@ -15,13 +15,40 @@ if str(_PARENT_DIR) not in sys.path:
 
 # Inside an MCPB bundle, vendored deps live under server/lib/py3XX/.
 # Pick the right subdir for the running Python.
-_VER_DIR = _THIS_DIR / "lib" / f"py3{sys.version_info.minor}"
-if _VER_DIR.is_dir() and str(_VER_DIR) not in sys.path:
-    sys.path.insert(0, str(_VER_DIR))
+_PY_TAG = f"py3{sys.version_info.minor}"
+_VER_DIR = _THIS_DIR / "lib" / _PY_TAG
+if _VER_DIR.is_dir():
+    if str(_VER_DIR) not in sys.path:
+        sys.path.insert(0, str(_VER_DIR))
+elif (_THIS_DIR / "lib").is_dir():
+    # We're in a bundle but no matching py3XX dir — fall back to highest
+    # available version. Native-extension wheels won't load across ABI
+    # boundaries, but pure-Python imports might still work.
+    _LIB_DIR = _THIS_DIR / "lib"
+    available = sorted(
+        (d for d in _LIB_DIR.iterdir()
+         if d.is_dir() and d.name.startswith("py3")),
+        key=lambda d: int(d.name[3:]) if d.name[3:].isdigit() else -1,
+        reverse=True,
+    )
+    if available:
+        sys.stderr.write(
+            f"WARNING: zoom-mcp bundle has no wheels for {_PY_TAG} "
+            f"(running Python {sys.version_info.major}.{sys.version_info.minor}). "
+            f"Falling back to {available[0].name}; native-extension imports "
+            f"(certifi, cryptography, pydantic_core) may fail. Rebuild the "
+            f"bundle with --include-py {_PY_TAG[2:]} or upgrade/downgrade "
+            f"your python3.\n"
+        )
+        sys.path.insert(0, str(available[0]))
+    else:
+        sys.stderr.write(
+            f"FATAL: zoom-mcp bundle missing all py3XX wheel dirs.\n"
+        )
 # Backward-compatible flat layout (when not built per-version)
 _FLAT_LIB = _THIS_DIR / "lib"
 if _FLAT_LIB.is_dir() and str(_FLAT_LIB) not in sys.path:
-    sys.path.insert(0, str(_FLAT_LIB))
+    sys.path.append(str(_FLAT_LIB))
 
 import mcp.server.stdio  # noqa: E402
 from mcp.server import NotificationOptions, Server  # noqa: E402
