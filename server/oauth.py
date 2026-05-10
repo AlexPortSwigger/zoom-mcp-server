@@ -91,7 +91,7 @@ class ZoomOAuthHandler:
         data = self.token_store.load()
         if not data or not data.get("access_token"):
             raise RuntimeError(
-                "No access token; call zoom_authenticate first."
+                "No access token; call zoom_auth_login first."
             )
         return {
             "Authorization": (
@@ -126,7 +126,7 @@ class ZoomOAuthHandler:
             authenticated request).
 
         Failures (port conflict, user closes window, timeout) are logged but
-        never crash the server — the user can still run zoom_authenticate
+        never crash the server — the user can still run zoom_auth_login
         manually afterwards.
         """
         data = self.token_store.load()
@@ -142,7 +142,7 @@ class ZoomOAuthHandler:
             if not ok:
                 self.logger.warning(
                     "Startup auth flow did not complete; user can run "
-                    "zoom_authenticate manually."
+                    "zoom_auth_login manually."
                 )
         except Exception as e:
             self.logger.error("Startup auth flow error: %s", e)
@@ -176,7 +176,7 @@ class ZoomOAuthHandler:
     ) -> httpx.Response:
         if not await self.ensure_authenticated():
             raise RuntimeError(
-                "Not authenticated. Use zoom_authenticate to start the flow."
+                "Not authenticated. Use zoom_auth_login to start the flow."
             )
         headers = kwargs.get("headers", {})
         headers.update(self.get_auth_headers())
