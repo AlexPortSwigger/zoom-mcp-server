@@ -1,4 +1,7 @@
-from server.cache.store import CacheStore
+import sqlite3
+from unittest.mock import patch
+
+from server.cache.store import CacheStore, _open_sqlite_with_wal
 
 
 def test_put_and_get_channels(tmp_path):
@@ -82,3 +85,71 @@ def test_clear_wipes_everything(tmp_path):
     assert store.get_channels() == []
     assert store.get_user_id_by_email("a@b.com") is None
     assert store.get_shared_spaces() == []
+
+
+# ---------- v2.2.9: lazy connection + WAL race tolerance ----------
+
+
+def test_constructor_does_not_open_sqlite(tmp_path):
+    """Lazy init: constructing the store must not open SQLite or
+    create the database file. This is what prevents Claude Desktop's
+    transient probe instances from racing on the WAL lock at
+    startup — they exit before any tool call, so they never touch
+    the file."""
+    db_path = tmp_path / "cache.db"
+    store = CacheStore(db_path)
+    assert store._conn is None
+    # SQLite file should not exist yet
+    assert not db_path.exists()
+
+
+def test_first_method_call_opens_connection(tmp_path):
+    db_path = tmp_path / "cache.db"
+    store = CacheStore(db_path)
+    # Trigger lazy open via a read
+    store.get_channels()
+    assert store._conn is not None
+    assert db_path.exists()
+
+
+def test_close_is_safe_when_never_opened(tmp_path):
+    """close() must not crash if the connection was never opened."""
+    store = CacheStore(tmp_path / "cache.db")
+    store.close()  # no-op
+    store.close()  # idempotent
+
+
+def test_open_sqlite_returns_working_connection_with_wal(tmp_path):
+    """Smoke test that _open_sqlite_with_wal opens a usable connection
+    in the default case (no contention). The retry/fallback paths are
+    exercised by the deployed connector when a real race happens."""
+    db = tmp_path / "cache.db"
+    conn = _open_sqlite_with_wal(db)
+    try:
+        # WAL should be on in the happy path
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode.lower() == "wal"
+        # Schema should be applied (channels table exists)
+        conn.execute("INSERT INTO channels (id, name, type, cached_at) "
+                     "VALUES (?, ?, ?, ?)", ("c1", "x", 3, 0))
+    finally:
+        conn.close()
+
+
+def test_concurrent_cachestore_construction_does_not_race(tmp_path):
+    """Critical regression test for the v2.2.8 install crash: Claude
+    Desktop spawns ~3 transient server instances at startup. Before
+    v2.2.9, each opened SQLite at construction time and the WAL
+    pragma raced — `database is locked` killed the real instance.
+
+    With lazy init, constructing many CacheStores against the same
+    file should cost nothing (no SQLite touches at all)."""
+    db_path = tmp_path / "cache.db"
+    stores = [CacheStore(db_path) for _ in range(5)]
+    # No connection opened on any of them — no file created
+    assert all(s._conn is None for s in stores)
+    assert not db_path.exists()
+    # Now open one for real and use it; the others stay lazy
+    stores[0].put_channels([{"id": "c1", "name": "x", "type": 3}])
+    assert stores[0]._conn is not None
+    assert all(s._conn is None for s in stores[1:])
