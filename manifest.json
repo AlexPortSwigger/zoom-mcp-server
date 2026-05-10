@@ -1,0 +1,50 @@
+{
+  "manifest_version": "0.2",
+  "name": "zoom-team-chat-search",
+  "display_name": "Zoom Team Chat & Transcripts",
+  "version": "2.0.0",
+  "description": "Read-only search across Zoom Team Chat messages and meeting transcripts.",
+  "long_description": "Provides 22 read-only tools for Zoom Team Chat (channels, messages, threads, attachments, shared spaces, mention groups, pinned messages, bookmarks) and meeting transcripts. Includes AI-Companion-powered search and grounded Q&A across Zoom Meetings, Chat, and Docs. Requires a Zoom Marketplace OAuth app with the read-only scopes documented in the README.",
+  "author": {"name": "Alex Craig"},
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": ["zoom", "team chat", "transcripts", "search", "ai-companion"],
+  "server": {
+    "type": "python",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "python3",
+      "args": ["${__dirname}/server/main.py"],
+      "env": {
+        "ZOOM_CLIENT_ID":     "${user_config.client_id}",
+        "ZOOM_CLIENT_SECRET": "${user_config.client_secret}",
+        "ZOOM_REDIRECT_URI":  "${user_config.redirect_uri}",
+        "PYTHONPATH":         "${__dirname}/server/lib"
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "client_id": {
+      "type": "string",
+      "title": "Zoom Client ID",
+      "description": "From your Zoom OAuth app at marketplace.zoom.us",
+      "required": true
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "Zoom Client Secret",
+      "description": "From your Zoom OAuth app at marketplace.zoom.us",
+      "required": true,
+      "sensitive": true
+    },
+    "redirect_uri": {
+      "type": "string",
+      "title": "OAuth Redirect URI",
+      "description": "Must match the redirect URI configured on your Zoom app.",
+      "default": "http://localhost:8000/oauth/callback",
+      "required": false
+    }
+  },
+  "compatibility": {"runtimes": {"python": ">=3.10"}}
+}
