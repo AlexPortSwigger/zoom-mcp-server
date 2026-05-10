@@ -10,13 +10,21 @@ Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config**
 | "Summarise #channel this week" | `zoom_message_history` over the date range, then Claude summarises |
 | "What did <person> say in #channel?" | `zoom_message_history` for the channel, filter by `sender` in the result |
 | "Catch me up on my DMs with <person>" | `zoom_message_history(contact=<email>)` |
-| "Find anything about <topic> across chat" | `zoom_search_messages(query, channel_filter?)` |
+| "Find anything about <topic> across chat (today)" | `zoom_search_messages(query, channel_filter?)` — fast Zoom-native search |
+| "Find <topic> mentioned weeks ago / recommendations from <person>" | `zoom_search_history(query, from_date, sender_filter?)` — deep client-side search, no 24h cap |
 | "What channels am I in?" | `zoom_chat_channels` (use `starred_only=true` for the active ones) |
 | "Who's in #channel?" | `zoom_chat_channel_members` |
 | "What meetings do I have today?" | `zoom_meeting_list(type=upcoming)` |
 | "Summary of meeting X" | `zoom_meeting_summary_get(meeting_id)` |
 | "Recent meeting summaries" | `zoom_meeting_list` then `zoom_meeting_summary_get` per meeting |
 | "Transcript of meeting X" | `zoom_meeting_transcript(meeting_id)` |
+
+### Two-tier search
+
+Zoom's native keyword search (`/chat/users/me/messages?search_type=message`) is fast but **server-side capped to ~24 hours of history regardless of `from_date`/`to_date`**. To search older content (which the Zoom UI search clearly indexes), v2.2.8 added `zoom_search_history`: it reads each channel/DM's full history via browse mode and filters keywords client-side. Slower (a few seconds per scan) but unbounded in time. Recommended pattern:
+
+1. Try `zoom_search_messages` first (fast, indexed).
+2. If it returns 0 hits and you expect older matches, fall back to `zoom_search_history` with a wider date range and any `sender_filter` you can use to narrow.
 
 The MCPB launches an OAuth browser flow on first install (PKCE, no client secret needed). Tokens are Fernet-encrypted on disk; transcripts and chat bodies are never persisted; the SQLite metadata cache stores names and IDs only.
 
@@ -70,11 +78,11 @@ If Zoom ships these endpoints in future, re-adding the tools is a one-line chang
 
 The MCPB has the PortSwigger Zoom dev app's **public client ID** baked in, and uses **PKCE** (RFC 7636) — no client secret anywhere, and no environment variables required.
 
-## What's available (21 tools)
+## What's available (22 tools)
 
 Each tool has standard MCP annotations, so Claude Desktop's connector-permissions screen groups them into:
 
-- **Read-only (19 tools)** — every Zoom API call we expose
+- **Read-only (20 tools)** — every Zoom API call we expose
 - **Write (1 tool)** — `zoom_auth_login` (saves OAuth tokens locally)
 - **Destructive (1 tool)** — `zoom_auth_logout` (wipes local tokens, cache, in-memory state)
 
@@ -88,7 +96,7 @@ Tool names share group prefixes (`zoom_auth_*`, `zoom_chat_*`, `zoom_meeting_*`,
 
 **`zoom_message_*`** — `zoom_message_history` (auto-paginated channel/DM history with reactions + attachment metadata inline), `zoom_message_thread`, `zoom_message_get`, `zoom_message_file`, `zoom_message_pinned`, `zoom_message_bookmarks`
 
-**`zoom_search_*`** — `zoom_search_messages` (parallel fan-out keyword search across chat)
+**`zoom_search_*`** — `zoom_search_messages` (fast Zoom-native search, 24h cap), `zoom_search_history` (deep client-side search, no time cap)
 
 ## How auth works
 

@@ -257,12 +257,37 @@ async def main() -> int:
                 "zoom_search_messages",
                 f"total_found={out['total_found']} "
                 f"scopes_searched={out['scopes_searched']} "
-                f"errored={out['scopes_errored']}",
+                f"errored={out['scopes_errored']}"
+                + (f" hint=present" if "hint" in out else ""),
             )
         except Exception as e:
             audit.failed("zoom_search_messages", str(e)[:200])
     else:
         audit.skipped("zoom_search_messages", "no channel for fan-out")
+
+    # zoom_search_history: deep keyword search with client-side filter,
+    # bypasses Zoom's 24h cap. Run a small probe — single channel, last
+    # 24h, common word — so the audit is fast.
+    if sample_channel:
+        try:
+            out = await search.search_history(
+                oauth,
+                channels=[sample_channel], contacts=[],
+                query="the",
+                from_date="2026-05-09",
+                to_date="2026-05-10",
+                max_results=3,
+            )
+            audit.passed(
+                "zoom_search_history",
+                f"total_found={out['total_found']} "
+                f"scopes_searched={out['scopes_searched']} "
+                f"errored={out['scopes_errored']} mode={out.get('mode')}",
+            )
+        except Exception as e:
+            audit.failed("zoom_search_history", str(e)[:200])
+    else:
+        audit.skipped("zoom_search_history", "no channel to scan")
 
     # ------------------------------------------------------------------
     # meetings + summaries
