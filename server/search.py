@@ -6,7 +6,7 @@ search across each channel (and DM thread, optionally) in parallel,
 merges results, and sorts by recency.
 """
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import httpx
 
@@ -18,6 +18,14 @@ _SEARCH_CONCURRENCY = 20
 _PER_SCOPE_LIMIT = 50  # Zoom message-list page max
 
 
+# Returned by _search_one alongside the items list: (items, error_string)
+# error_string is None on success, otherwise a short, single-line summary
+# of what went wrong (HTTP status + truncated body, or transport error
+# message). The caller aggregates these to surface a representative
+# sample to the user instead of silently swallowing.
+_OneResult = Tuple[List[Dict[str, Any]], Optional[str]]
+
+
 async def _search_one(
     sem: asyncio.Semaphore,
     headers: Dict[str, str],
@@ -27,7 +35,7 @@ async def _search_one(
     query: str,
     from_date: Optional[str],
     to_date: Optional[str],
-) -> List[Dict[str, Any]]:
+) -> _OneResult:
     async with sem:
         params: Dict[str, Any] = {
             "search_type": "message",
@@ -50,19 +58,19 @@ async def _search_one(
                 headers=headers,
                 params=params,
             )
-        except httpx.RequestError:
-            return []
+        except httpx.RequestError as e:
+            return [], f"transport: {type(e).__name__}: {e}"
         if r.status_code != 200:
-            return []
+            body = (r.text or "")[:200].replace("\n", " ").strip()
+            return [], f"HTTP {r.status_code}: {body}"
         data = r.json()
         items = data.get("messages", [])
-        # Tag each item with its scope so callers can show channel context
         for item in items:
             if to_channel and "to_channel" not in item:
                 item["to_channel"] = to_channel
             if to_contact and "to_contact" not in item:
                 item["to_contact"] = to_contact
-        return items
+        return items, None
 
 
 async def search_messages(
@@ -79,10 +87,17 @@ async def search_messages(
     """Fan out scoped searches across channels and DM contacts in parallel.
 
     Returns:
-      {"results": [...], "total_found": N, "scopes_searched": M, "scopes_errored": E}
+      {
+        "results": [...],
+        "total_found": N,
+        "scopes_searched": M,
+        "scopes_errored": E,
+        "sample_errors": [str, ...],   # up to 3 distinct error strings
+      }
     """
     if not query or not query.strip():
         raise ValueError("query is required")
+    q = query.strip()
 
     headers = oauth_handler.get_auth_headers()
 
@@ -101,7 +116,7 @@ async def search_messages(
                 sem,
                 headers,
                 to_channel=c["id"],
-                query=query,
+                query=q,
                 from_date=from_date,
                 to_date=to_date,
             )
@@ -112,22 +127,37 @@ async def search_messages(
                 sem,
                 headers,
                 to_contact=ct["id"],
-                query=query,
+                query=q,
                 from_date=from_date,
                 to_date=to_date,
             )
         )
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results: List[Union[_OneResult, BaseException]] = await asyncio.gather(
+        *tasks, return_exceptions=True
+    )
     merged: List[Dict[str, Any]] = []
     errors = 0
+    sample_errors: List[str] = []
+    seen_error_keys: set = set()
     for r in results:
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             errors += 1
-            continue
-        merged.extend(r)
+            err_str = f"exception: {type(r).__name__}: {r}"
+        else:
+            items, err_str = r
+            if err_str is None:
+                merged.extend(items)
+                continue
+            errors += 1
+        # Aggregate up to 3 *distinct* error fingerprints. Many channels
+        # often return the same 400, so we de-dupe on the leading prefix
+        # to keep the sample small but representative.
+        key = err_str[:80]
+        if key not in seen_error_keys and len(sample_errors) < 3:
+            seen_error_keys.add(key)
+            sample_errors.append(err_str)
 
-    # Sort by date_time DESC; missing timestamps sort last
     def _ts(m: Dict[str, Any]) -> str:
         return m.get("date_time") or ""
 
@@ -139,4 +169,5 @@ async def search_messages(
         "total_found": len(merged),
         "scopes_searched": len(tasks),
         "scopes_errored": errors,
+        "sample_errors": sample_errors,
     }
