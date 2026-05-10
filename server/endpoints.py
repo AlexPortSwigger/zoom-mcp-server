@@ -78,16 +78,16 @@ ENDPOINTS: List[Dict[str, Any]] = [
         "name": "zoom_chat_channels",
         "summary": (
             "List the Zoom Team Chat channels the user is a member of. "
-            "Returns id, name, type, and starred flag for each. Use this "
-            "to (a) get the channel ID before calling zoom_message_history "
-            "or zoom_message_pinned for a specific channel by name, or "
-            "(b) discover what channels exist when the user asks 'what "
-            "channels am I in?'. Pass starred_only=true to focus on the "
-            "channels the user actively cares about (typically their "
-            "team / project channels) — strongly recommended as a default "
-            "for 'pulse on Zoom' style queries across hundreds of "
-            "channels. Cache-first; data is fresh on first launch and "
-            "refreshes lazily."
+            "Returns id, name, type for each. Use this to (a) get a "
+            "channel ID before calling zoom_message_history or "
+            "zoom_message_pinned for a specific channel by name, or (b) "
+            "discover what channels exist when the user asks 'what "
+            "channels am I in?'. Cache-first; data is fresh on first "
+            "launch and refreshes lazily.\n\n"
+            "Note: Zoom's `/chat/users/me/channels` REST endpoint does "
+            "not expose 'starred' status, so we can't filter to "
+            "starred-only here. For narrowing, use `name_filter` or "
+            "scan results client-side."
         ),
         "handler": "list_channels",
         "body": {
@@ -95,11 +95,11 @@ ENDPOINTS: List[Dict[str, Any]] = [
                 "type": "boolean",
                 "description": "Force a fresh fetch from Zoom, bypassing cache.",
             },
-            "starred_only": {
-                "type": "boolean",
+            "name_filter": {
+                "type": "string",
                 "description": (
-                    "Return only channels the user has starred in the Zoom "
-                    "client. Use this for 'pulse / important channels' queries."
+                    "Optional case-insensitive substring of channel name "
+                    "to narrow results (e.g. 'eng', 'product', 'devs')."
                 ),
             },
         },
@@ -406,22 +406,20 @@ ENDPOINTS: List[Dict[str, Any]] = [
     {
         "name": "zoom_search_messages",
         "summary": (
-            "Search Zoom Team Chat messages by keyword across all the user's "
-            "channels and DMs in parallel. Use this for 'find anything about "
-            "<topic>', 'has anyone mentioned <X>?', 'what did <person> say "
-            "about <Y>?'. Returns each hit tagged with the channel/contact "
-            "it came from, with most-recent first.\n\n"
-            "Important behaviour to know:\n"
-            "- Zoom enforces a server-side cap of ~24 hours on each search "
-            "  call regardless of `from_date`/`to_date` — for older content, "
-            "  prefer `zoom_message_history` over a date range and let the "
-            "  caller scan results.\n"
-            "- For wide queries across 1000+ channels, use `channel_filter` "
-            "  to narrow to a name substring (e.g. 'eng', 'product') so the "
-            "  fan-out stays fast.\n"
-            "- The result includes `total_found`, `scopes_searched`, "
-            "  `scopes_errored`, and `sample_errors[]` so callers can see "
-            "  exactly what worked and what didn't."
+            "Fast keyword search across Zoom Team Chat using Zoom's native "
+            "search API. Use this as the FIRST attempt for 'find anything "
+            "about <topic>' or 'has anyone mentioned <X>'.\n\n"
+            "**Critical limitation: Zoom caps each call to ~24 hours of "
+            "history server-side, regardless of from_date/to_date.** If a "
+            "query that should match returns 0 hits, the message is "
+            "almost certainly older than yesterday — fall back to "
+            "`zoom_search_history` for the same query with a wider date "
+            "range. (`zoom_search_messages` is fast; `zoom_search_history` "
+            "is slower but unlimited in time range.)\n\n"
+            "Returns: results[] (most-recent first, each tagged with its "
+            "channel/contact), total_found, scopes_searched, "
+            "scopes_errored, sample_errors[] (deduped error fingerprints), "
+            "mode='fast'."
         ),
         "handler": "search_messages",
         "body": {
@@ -457,6 +455,111 @@ ENDPOINTS: List[Dict[str, Any]] = [
             },
         },
         "required": ["query"],
+    },
+    {
+        "name": "zoom_search_history",
+        "summary": (
+            "Deep keyword search across Zoom Team Chat history — bypasses "
+            "Zoom's 24h native-search cap by reading the full message "
+            "history of each scope and filtering client-side.\n\n"
+            "**WHEN TO USE THIS TOOL:**\n"
+            "- Whenever `zoom_search_messages` returns 0 hits and you "
+            "  suspect the message exists (especially when its `hint` "
+            "  field tells you so). The `zoom_search_messages` 24h cap "
+            "  is invisible to the caller; assume any 0-hit result for "
+            "  a real-sounding query is hiding older content.\n"
+            "- For 'find messages from <person> about <topic>' — pass "
+            "  `query=<topic>` and `sender_filter=<their email or "
+            "  display name>`.\n"
+            "- For 'what did <person> say in our DMs?' — also pass "
+            "  `contacts=[<their email>]` to include the DM thread.\n"
+            "- When the user gives a rough date range ('last week', "
+            "  'this month', 'in March'), use a generous `from_date`/"
+            "  `to_date`; deep search honours them fully.\n\n"
+            "**RECOMMENDED CALL PATTERN:**\n"
+            "```\n"
+            "zoom_search_history(\n"
+            "  query=\"SVPG\",                       # the keyword\n"
+            "  from_date=\"2026-02-10\",             # 90d back\n"
+            "  to_date=\"2026-05-10\",               # today\n"
+            "  sender_filter=\"alex.craig\",         # if 'from <person>'\n"
+            "  channel_filter=\"product\",           # narrow to relevant\n"
+            "  contacts=[\"alex.craig@portswigger.net\"],  # DM with them\n"
+            ")\n"
+            "```\n\n"
+            "**PERFORMANCE & SCOPE:**\n"
+            "- Default scans ALL channels the user is in (typically "
+            "  ~30s for 1500 channels × 30 days). Use `channel_filter` "
+            "  to narrow to a name substring whenever you can — drops "
+            "  scan time proportionally.\n"
+            "- DMs are NOT scanned by default — pass `contacts=[...]` "
+            "  to include specific DM threads.\n"
+            "- Each scope is paged up to 2000 messages; very high-"
+            "  volume channels may be partially scanned.\n\n"
+            "**WHAT IT DOESN'T COVER:** This tool only searches Zoom "
+            "**Team Chat** messages. It does NOT search meeting "
+            "transcripts, meeting summaries, or Zoom Docs. If a user "
+            "remembers something said 'in a meeting', try "
+            "`zoom_meeting_summary_get` or `zoom_meeting_transcript` "
+            "for the relevant meeting instead."
+        ),
+        "handler": "search_history",
+        "body": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Substring to match (case-insensitive) against the "
+                    "message body. Plain substring; 'SVPG' matches "
+                    "'SVPG / Cagan'. No wildcards/regex."
+                ),
+            },
+            "from_date": {
+                "type": "string",
+                "description": (
+                    "yyyy-MM-dd or ISO-8601 start. **Required** — "
+                    "scope-bounded: scan time scales with date range. "
+                    "Use 30d for 'last month' queries, 90d for "
+                    "'recently', 180d for 'in the last few months'."
+                ),
+            },
+            "to_date": {
+                "type": "string",
+                "description": "yyyy-MM-dd or ISO-8601 end. Default: now.",
+            },
+            "channel_filter": {
+                "type": "string",
+                "description": (
+                    "**Strongly recommended for speed.** Case-insensitive "
+                    "substring of channel name to narrow scope (e.g. "
+                    "'eng', 'product', 'devs'). Without this, all "
+                    "channels are scanned (slow in large workspaces)."
+                ),
+            },
+            "contacts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "List of contact emails (or contact IDs) for DM "
+                    "threads to scan in addition to channels. Use this "
+                    "for 'messages with <person>' queries. Empty "
+                    "default — DMs are not scanned unless asked for."
+                ),
+            },
+            "sender_filter": {
+                "type": "string",
+                "description": (
+                    "Only return messages whose sender (email) or "
+                    "sender_display_name contains this string "
+                    "(case-insensitive). Use for 'messages from "
+                    "<person>'."
+                ),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Max results returned (default 100).",
+            },
+        },
+        "required": ["query", "from_date"],
     },
 ]
 
