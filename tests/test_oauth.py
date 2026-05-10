@@ -1,13 +1,21 @@
 """Tests for the PKCE-based ZoomOAuthHandler (no client_secret)."""
 import base64
 import hashlib
+import socket
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from server import http_client
-from server.oauth import ZoomOAuthHandler, _gen_pkce_pair
+from server.oauth import (
+    DEFAULT_PORTS,
+    ZoomOAuthHandler,
+    _CallbackState,
+    _diagnose_port_holder,
+    _gen_pkce_pair,
+)
 from server.token_store import TokenStore
 
 
@@ -27,7 +35,7 @@ def oauth(store):
     return ZoomOAuthHandler(
         client_id="CID",
         token_store=store,
-        redirect_uri="http://localhost:8000/oauth/callback",
+        redirect_uri="http://localhost:53682/oauth/callback",
     )
 
 
@@ -54,13 +62,117 @@ def test_gen_pkce_pair_is_random():
 # ---------- auth URL ----------
 
 
+# ---------- callback listener ----------
+
+
+def test_candidate_ports_starts_with_redirect_uri_port(store):
+    h = ZoomOAuthHandler(
+        client_id="C",
+        token_store=store,
+        redirect_uri="http://localhost:9999/oauth/callback",
+    )
+    ports = h._candidate_ports()
+    assert ports[0] == 9999, "primary port from redirect_uri must come first"
+    # All defaults should appear (no duplicates of primary)
+    for p in DEFAULT_PORTS:
+        assert p in ports
+    assert ports.count(9999) == 1
+
+
+def test_candidate_ports_uses_default_when_redirect_has_no_port(store):
+    h = ZoomOAuthHandler(
+        client_id="C",
+        token_store=store,
+        redirect_uri="http://localhost/oauth/callback",
+    )
+    assert h._candidate_ports()[0] == DEFAULT_PORTS[0]
+
+
+def test_default_port_is_53682():
+    """v2.2.7: migrated default from 8000 to 53682 (gcloud SDK port,
+    IANA dynamic range, low conflict probability)."""
+    assert DEFAULT_PORTS[0] == 53682
+
+
+def _free_port() -> int:
+    """Grab a free port for tests."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_bind_callback_listeners_binds_dual_stack(oauth):
+    """The fix: oauth flow must bind on BOTH 127.0.0.1 and ::1 so the
+    browser's choice of localhost address family doesn't matter."""
+    port = _free_port()
+    servers, state = oauth._bind_callback_listeners(port)
+    try:
+        assert isinstance(state, _CallbackState)
+        # Should have at least one (IPv4 always available; IPv6 may not be
+        # depending on test runner). We require IPv4 at minimum.
+        families = {s.address_family for s in servers}
+        assert socket.AF_INET in families, "IPv4 binding is the floor"
+        # State is shared across all listeners
+        for srv in servers:
+            assert srv.state is state
+    finally:
+        for srv in servers:
+            srv.server_close()
+
+
+def test_bind_callback_listeners_raises_when_port_busy(oauth):
+    """If port is already taken on both families, the bind helper raises
+    OSError so the caller can fall back to a different port."""
+    # Hold the port on both 127.0.0.1 and ::1
+    holders = []
+    port = _free_port()
+    for family, addr in [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")]:
+        try:
+            s = socket.socket(family, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            s.bind((addr, port))
+            s.listen(1)
+            holders.append(s)
+        except OSError:
+            pass  # IPv6 may not be available in test env
+    try:
+        if not holders:
+            pytest.skip("could not bind port for test setup")
+        with pytest.raises(OSError):
+            oauth._bind_callback_listeners(port)
+    finally:
+        for h in holders:
+            h.close()
+
+
+def test_diagnose_port_holder_returns_a_string():
+    """We don't care what the lsof output is — just that the helper
+    doesn't crash on a likely-free or likely-busy port. It should return
+    a string the user can act on (or a clear "no listener" note)."""
+    out = _diagnose_port_holder(_free_port())
+    assert isinstance(out, str)
+    assert len(out) > 0
+
+
+def test_callback_state_starts_blank():
+    s = _CallbackState()
+    assert s.auth_code is None
+    assert s.auth_state is None
+    assert s.auth_error is None
+
+
+# ---------- auth URL ----------
+
+
 def test_get_auth_url_includes_pkce_params(oauth):
     url = oauth.get_auth_url("CHALLENGE", "STATE")
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
     assert qs["response_type"] == ["code"]
     assert qs["client_id"] == ["CID"]
-    assert qs["redirect_uri"] == ["http://localhost:8000/oauth/callback"]
+    assert qs["redirect_uri"] == ["http://localhost:53682/oauth/callback"]
     assert qs["code_challenge"] == ["CHALLENGE"]
     assert qs["code_challenge_method"] == ["S256"]
     assert qs["state"] == ["STATE"]
