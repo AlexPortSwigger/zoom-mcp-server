@@ -62,10 +62,10 @@ async def test_paginate_all_respects_max_items(httpx_mock):
     assert items == [1, 2, 3]
 
 
-def test_endpoints_table_has_20_tools():
+def test_endpoints_table_has_25_tools():
     from server.endpoints import ENDPOINTS
 
-    assert len(ENDPOINTS) == 20
+    assert len(ENDPOINTS) == 25
 
 
 def test_endpoints_have_unique_names():
@@ -85,8 +85,10 @@ def test_endpoints_all_have_handler():
 def test_endpoint_by_name_lookup():
     from server.endpoints import endpoint_by_name
 
-    ep = endpoint_by_name("zoom_search_messages")
-    assert ep["handler"] == "search_messages"
+    # AI Companion search
+    assert endpoint_by_name("zoom_search")["handler"] == "ai_companion_search"
+    # Manual fan-out fallback
+    assert endpoint_by_name("zoom_search_messages")["handler"] == "search_messages"
 
 
 def test_endpoint_by_name_raises_keyerror():
