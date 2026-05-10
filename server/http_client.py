@@ -8,8 +8,26 @@ import httpx
 _CLIENT: Optional[httpx.AsyncClient] = None
 
 
+def _ca_bundle() -> Optional[str]:
+    """Return path to a CA bundle, preferring the bundled certifi cacert.pem.
+
+    Python on macOS (and some Linux distributions when launched via certain
+    paths) doesn't always have a populated system CA store, which makes
+    ssl.create_default_context() fail Zoom TLS handshakes with
+    'CERTIFICATE_VERIFY_FAILED'. Pointing at certifi's bundled cacert.pem
+    fixes this — and certifi is already a transitive dependency of httpx
+    that we ship inside the MCPB.
+    """
+    try:
+        import certifi
+        return certifi.where()
+    except ImportError:
+        return None
+
+
 def _build_ssl_context() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
+    ca = _ca_bundle()
+    ctx = ssl.create_default_context(cafile=ca) if ca else ssl.create_default_context()
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx
 
