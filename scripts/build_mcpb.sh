@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build per-platform .mcpb bundles using @anthropic-ai/mcpb.
 #
-# Each bundle ships native-extension wheels for Python 3.11, 3.12, and 3.13.
+# Each bundle ships native-extension wheels for Python 3.10–3.14.
 # server/main.py picks the matching version-specific subdir at startup.
 #
 # Usage:
@@ -17,7 +17,7 @@ mkdir -p "$DIST"
 declare -a PLATFORMS=("macosx_11_0_arm64" "macosx_11_0_x86_64" \
                       "manylinux_2_17_x86_64" "win_amd64")
 declare -a TAGS=("darwin-arm64" "darwin-x64" "linux-x64" "win-x64")
-declare -a PY_VERSIONS=("3.11" "3.12" "3.13")
+declare -a PY_VERSIONS=("3.10" "3.11" "3.12" "3.13" "3.14")
 
 host_tag() {
   local uname_s uname_m
