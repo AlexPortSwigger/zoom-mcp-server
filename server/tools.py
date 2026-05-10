@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from mcp.types import Tool
+from mcp.types import Tool, ToolAnnotations
 
 from . import (
     ai_companion,
@@ -45,7 +45,12 @@ class ZoomTools:
             if ep.get("required"):
                 schema["required"] = ep["required"]
             out.append(
-                Tool(name=ep["name"], description=ep["summary"], inputSchema=schema)
+                Tool(
+                    name=ep["name"],
+                    description=ep["summary"],
+                    inputSchema=schema,
+                    annotations=_annotations_for(ep["name"]),
+                )
             )
         return out
 
@@ -523,3 +528,31 @@ def _json(obj: Any) -> List[Dict[str, Any]]:
 
 def _err(msg: str) -> List[Dict[str, Any]]:
     return [{"type": "text", "text": f"Error: {msg}"}]
+
+
+# ---- tool annotations ----
+#
+# Claude Desktop's connector-permissions UI groups tools by the
+# `readOnlyHint` / `destructiveHint` annotations into Read-only / Write /
+# Destructive sections (it does not support custom categories). Almost
+# every Zoom tool we expose is a pure read; only the auth flow tools
+# modify local state.
+
+# Tools that mutate local state (write, but non-destructive)
+_WRITE_TOOLS = {
+    "zoom_auth_login",  # opens browser, saves OAuth tokens locally
+}
+
+# Tools that destroy local state
+_DESTRUCTIVE_TOOLS = {
+    "zoom_auth_logout",  # wipes tokens, cache, in-memory state
+}
+
+
+def _annotations_for(tool_name: str) -> ToolAnnotations:
+    if tool_name in _DESTRUCTIVE_TOOLS:
+        return ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+    if tool_name in _WRITE_TOOLS:
+        return ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+    # Default: read-only Zoom API call
+    return ToolAnnotations(readOnlyHint=True, destructiveHint=False)
