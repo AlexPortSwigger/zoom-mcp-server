@@ -7,9 +7,21 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-# When run as a script (e.g. via MCPB), make sibling modules importable
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Prepend sibling-module path (so `server.*` resolves when run as a script)
+_THIS_DIR = Path(__file__).resolve().parent
+_PARENT_DIR = _THIS_DIR.parent
+if str(_PARENT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PARENT_DIR))
+
+# Inside an MCPB bundle, vendored deps live under server/lib/py3XX/.
+# Pick the right subdir for the running Python.
+_VER_DIR = _THIS_DIR / "lib" / f"py3{sys.version_info.minor}"
+if _VER_DIR.is_dir() and str(_VER_DIR) not in sys.path:
+    sys.path.insert(0, str(_VER_DIR))
+# Backward-compatible flat layout (when not built per-version)
+_FLAT_LIB = _THIS_DIR / "lib"
+if _FLAT_LIB.is_dir() and str(_FLAT_LIB) not in sys.path:
+    sys.path.insert(0, str(_FLAT_LIB))
 
 import mcp.server.stdio  # noqa: E402
 from mcp.server import NotificationOptions, Server  # noqa: E402

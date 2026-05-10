@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 # Build per-platform .mcpb bundles using @anthropic-ai/mcpb.
 #
+# Each bundle ships native-extension wheels for Python 3.11, 3.12, and 3.13.
+# server/main.py picks the matching version-specific subdir at startup.
+#
 # Usage:
 #   ./scripts/build_mcpb.sh                  # build for the host platform only
 #   ./scripts/build_mcpb.sh --all            # build for all platforms (needs internet)
 #   ./scripts/build_mcpb.sh --tag <tag>      # build a specific tag
-#
-# Requires: pip, python3, npx (for @anthropic-ai/mcpb)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 mkdir -p "$DIST"
 
-# Map: pip-platform -> short-tag
 declare -a PLATFORMS=("macosx_11_0_arm64" "macosx_11_0_x86_64" \
                       "manylinux_2_17_x86_64" "win_amd64")
 declare -a TAGS=("darwin-arm64" "darwin-x64" "linux-x64" "win-x64")
+declare -a PY_VERSIONS=("3.11" "3.12" "3.13")
 
-# Detect host platform
 host_tag() {
   local uname_s uname_m
   uname_s="$(uname -s)"
@@ -52,33 +52,32 @@ build_one() {
   local STAGE="$ROOT/build/$TAG"
   echo "==> Building for $TAG ($PIP_PLATFORM)"
   rm -rf "$STAGE"
-  mkdir -p "$STAGE/server/lib"
+  mkdir -p "$STAGE/server"
 
-  # Stage source
   cp -r "$ROOT/server"        "$STAGE/"
   cp    "$ROOT/manifest.json" "$STAGE/"
   cp    "$ROOT/icon.png"      "$STAGE/"
-
-  # Strip __pycache__ that might have been copied
   find "$STAGE/server" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
-  # Pull deps. Use python_version 3.11 as the floor; 3.12/3.13 wheels usually compatible.
-  python3 -m pip download \
-    --quiet \
-    --platform "$PIP_PLATFORM" \
-    --python-version 3.11 \
-    --only-binary :all: \
-    -d "$STAGE/server/lib" \
-    -r "$ROOT/requirements.txt"
+  for PY in "${PY_VERSIONS[@]}"; do
+    local LIBDIR="$STAGE/server/lib/py${PY//./}"
+    mkdir -p "$LIBDIR"
+    echo "    fetching wheels for Python $PY..."
+    python3 -m pip download \
+      --quiet \
+      --platform "$PIP_PLATFORM" \
+      --python-version "$PY" \
+      --only-binary :all: \
+      -d "$LIBDIR" \
+      -r "$ROOT/requirements.txt"
 
-  # Unpack wheels for runtime import (PYTHONPATH=server/lib)
-  for whl in "$STAGE/server/lib"/*.whl; do
-    [ -f "$whl" ] || continue
-    unzip -qo "$whl" -d "$STAGE/server/lib"
-    rm "$whl"
+    for whl in "$LIBDIR"/*.whl; do
+      [ -f "$whl" ] || continue
+      unzip -qo "$whl" -d "$LIBDIR"
+      rm "$whl"
+    done
   done
 
-  # Pack via the official mcpb tool
   npx --yes @anthropic-ai/mcpb pack "$STAGE" "$DIST/zoom-mcp-${TAG}.mcpb"
   rm -rf "$STAGE"
 }
