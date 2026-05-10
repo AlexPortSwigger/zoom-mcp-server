@@ -314,3 +314,250 @@ async def test_search_includes_sample_errors_key_even_on_success(httpx_mock):
     )
     assert "sample_errors" in out
     assert out["sample_errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_messages_returns_fallback_hint_on_zero_hits(httpx_mock):
+    """When search_messages returns 0 hits and 0 errors, it must include
+    a hint pointing the caller (Claude) at zoom_search_history. This is
+    the auto-fallback signal that makes deep search discoverable when
+    the 24h cap silently hides older matches."""
+    httpx_mock.add_response(
+        method="GET",
+        url=httpx.URL(
+            "https://api.zoom.us/v2/chat/users/me/messages",
+            params={
+                "search_type": "message",
+                "search_key": "SVPG",
+                "page_size": 50,
+                "to_channel": "C1",
+            },
+        ),
+        json={"messages": []},
+    )
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_messages(
+        oauth,
+        channels=[{"id": "C1", "name": "g"}],
+        contacts=[],
+        query="SVPG",
+    )
+    assert out["total_found"] == 0
+    assert out["scopes_errored"] == 0
+    assert "hint" in out
+    assert "zoom_search_history" in out["hint"]
+    assert "24" in out["hint"]  # mentions the 24h cap
+
+
+@pytest.mark.asyncio
+async def test_search_messages_no_hint_when_hits_found(httpx_mock):
+    """No hint needed when results came back."""
+    httpx_mock.add_response(
+        method="GET",
+        url=httpx.URL(
+            "https://api.zoom.us/v2/chat/users/me/messages",
+            params={
+                "search_type": "message",
+                "search_key": "x",
+                "page_size": 50,
+                "to_channel": "C1",
+            },
+        ),
+        json={"messages": [
+            {"id": "m1", "message": "hi", "date_time": "2026-05-10T10:00:00Z"}
+        ]},
+    )
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_messages(
+        oauth, channels=[{"id": "C1", "name": "g"}], contacts=[], query="x",
+    )
+    assert out["total_found"] == 1
+    assert "hint" not in out
+
+
+# ----------------------------------------------------------------------
+# search_history — deep client-side keyword search (no 24h cap)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_history_filters_messages_by_substring(httpx_mock):
+    """search_history reads channel history (browse mode) and applies the
+    keyword filter client-side. This is what makes it bypass Zoom's 24h
+    keyword-search cap."""
+    httpx_mock.add_response(
+        method="GET",
+        url=httpx.URL(
+            "https://api.zoom.us/v2/chat/users/me/messages",
+            params={"to_channel": "C1", "from": "2026-04-01",
+                    "to": "2026-05-01", "page_size": 50},
+        ),
+        json={
+            "messages": [
+                {"id": "m1", "message": "We should read SVPG by Cagan",
+                 "sender": "alex@x", "date_time": "2026-04-15T10:00:00Z"},
+                {"id": "m2", "message": "Lunch tomorrow?",
+                 "sender": "bob@x", "date_time": "2026-04-15T11:00:00Z"},
+                {"id": "m3", "message": "Cagan's Empowered is great",
+                 "sender": "alex@x", "date_time": "2026-04-16T09:00:00Z"},
+            ],
+            "next_page_token": "",
+        },
+    )
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_history(
+        oauth,
+        channels=[{"id": "C1", "name": "Devs"}],
+        contacts=[],
+        query="Cagan",
+        from_date="2026-04-01",
+        to_date="2026-05-01",
+    )
+    assert out["mode"] == "history"
+    assert out["total_found"] == 2  # SVPG msg + Empowered msg
+    assert out["scopes_searched"] == 1
+    assert out["scopes_errored"] == 0
+    # Sorted recent-first, tagged with channel
+    assert out["results"][0]["id"] == "m3"
+    assert out["results"][0]["channel_name"] == "Devs"
+    assert out["results"][0]["to_channel"] == "C1"
+
+
+@pytest.mark.asyncio
+async def test_search_history_sender_filter(httpx_mock):
+    """sender_filter narrows results to messages from a specific sender.
+    Used for 'find messages from <person> about <topic>'."""
+    httpx_mock.add_response(
+        method="GET",
+        url=httpx.URL(
+            "https://api.zoom.us/v2/chat/users/me/messages",
+            params={"to_channel": "C1", "from": "2026-04-01", "page_size": 50},
+        ),
+        json={
+            "messages": [
+                {"id": "m1", "message": "podcast rec: Lenny",
+                 "sender": "alex.craig@portswigger.net",
+                 "date_time": "2026-04-15T10:00:00Z"},
+                {"id": "m2", "message": "I love that podcast too",
+                 "sender": "tom@portswigger.net",
+                 "date_time": "2026-04-15T11:00:00Z"},
+            ],
+        },
+    )
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_history(
+        oauth,
+        channels=[{"id": "C1", "name": "Devs"}],
+        contacts=[],
+        query="podcast",
+        from_date="2026-04-01",
+        sender_filter="alex.craig",
+    )
+    assert out["total_found"] == 1
+    assert out["results"][0]["id"] == "m1"
+
+
+@pytest.mark.asyncio
+async def test_search_history_sender_filter_matches_display_name(httpx_mock):
+    """sender_filter checks both sender (email) and sender_display_name."""
+    httpx_mock.add_response(
+        method="GET",
+        url=httpx.URL(
+            "https://api.zoom.us/v2/chat/users/me/messages",
+            params={"to_channel": "C1", "from": "2026-04-01", "page_size": 50},
+        ),
+        json={
+            "messages": [
+                {"id": "m1", "message": "interesting article",
+                 "sender": "ac@portswigger.net",
+                 "sender_display_name": "Alex Craig",
+                 "date_time": "2026-04-15T10:00:00Z"},
+            ],
+        },
+    )
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_history(
+        oauth,
+        channels=[{"id": "C1", "name": "Devs"}],
+        contacts=[],
+        query="article",
+        from_date="2026-04-01",
+        sender_filter="Alex Craig",  # matches display name
+    )
+    assert out["total_found"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_history_aggregates_across_scopes(httpx_mock):
+    """Each channel + contact contributes to the merged result set,
+    sorted by date_time DESC."""
+    for ch in ("C1", "C2"):
+        httpx_mock.add_response(
+            method="GET",
+            url=httpx.URL(
+                "https://api.zoom.us/v2/chat/users/me/messages",
+                params={"to_channel": ch, "from": "2026-04-01", "page_size": 50},
+            ),
+            json={
+                "messages": [
+                    {"id": f"{ch}-1", "message": "TARGET word here",
+                     "sender": "x@y", "date_time": f"2026-05-0{1 if ch=='C1' else 2}T10:00:00Z"},
+                ],
+            },
+        )
+    httpx_mock.add_response(
+        method="GET",
+        url=httpx.URL(
+            "https://api.zoom.us/v2/chat/users/me/messages",
+            params={"to_contact": "U1", "from": "2026-04-01", "page_size": 50},
+        ),
+        json={
+            "messages": [
+                {"id": "U1-1", "message": "TARGET in DM",
+                 "sender": "x@y", "date_time": "2026-05-03T10:00:00Z"},
+            ],
+        },
+    )
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_history(
+        oauth,
+        channels=[{"id": "C1", "name": "ch1"}, {"id": "C2", "name": "ch2"}],
+        contacts=[{"id": "U1", "email": "u@y"}],
+        query="TARGET",
+        from_date="2026-04-01",
+    )
+    assert out["scopes_searched"] == 3
+    assert out["total_found"] == 3
+    # Sorted DESC by date_time — DM (May 3) first, then C2 (May 2), then C1 (May 1)
+    assert [r["id"] for r in out["results"]] == ["U1-1", "C2-1", "C1-1"]
+
+
+@pytest.mark.asyncio
+async def test_search_history_rejects_empty_query():
+    oauth = AsyncMock()
+    with pytest.raises(ValueError):
+        await search.search_history(
+            oauth, channels=[], contacts=[], query="",
+            from_date="2026-04-01",
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_history_returns_mode_history():
+    """Result schema has mode='history' so callers can distinguish
+    from search_messages results (mode='fast')."""
+    oauth = AsyncMock()
+    oauth.get_auth_headers = lambda: {"Authorization": "Bearer X"}
+    out = await search.search_history(
+        oauth, channels=[], contacts=[], query="x",
+        from_date="2026-04-01",
+    )
+    assert out["mode"] == "history"
+    assert out["scopes_searched"] == 0
+    assert out["total_found"] == 0

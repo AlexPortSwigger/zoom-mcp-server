@@ -209,6 +209,64 @@ class ZoomTools:
         )
         return _json(out)
 
+    async def _h_search_history(self, args):
+        """Deep client-side history search — bypasses Zoom's 24h cap."""
+        # Build the channel target list. By default we scan ALL channels
+        # the user is in (slow but complete). channel_filter narrows by
+        # name substring — strongly recommended for speed in big
+        # workspaces. Note: Zoom's `/chat/users/me/channels` doesn't
+        # expose starred/favourite status, so we can't offer a
+        # starred-only fast path.
+        channels = self.cache.get_channels()
+        if not channels:
+            await self._refresh_channels()
+            channels = self.cache.get_channels()
+
+        channel_filter = (args.get("channel_filter") or "").strip().lower()
+        if channel_filter:
+            target_channels = [
+                c for c in channels
+                if channel_filter in (c.get("name") or "").lower()
+            ]
+        else:
+            target_channels = channels
+
+        # Resolve any contact emails -> ids
+        target_contacts: List[Dict[str, Any]] = []
+        contact_inputs = args.get("contacts") or []
+        if contact_inputs:
+            all_contacts = self.cache.get_contacts()
+            if not all_contacts:
+                await self._refresh_contacts()
+                all_contacts = self.cache.get_contacts()
+            by_email = {c.get("email", "").lower(): c for c in all_contacts}
+            by_id = {c.get("id"): c for c in all_contacts}
+            for x in contact_inputs:
+                xl = (x or "").strip().lower()
+                if xl in by_email:
+                    target_contacts.append(by_email[xl])
+                elif x in by_id:
+                    target_contacts.append(by_id[x])
+                else:
+                    # Unknown — pass through as a bare ID; Zoom will reject if invalid
+                    target_contacts.append({"id": x, "email": x})
+
+        out = await search.search_history(
+            self.oauth,
+            channels=target_channels,
+            contacts=target_contacts,
+            query=args["query"],
+            from_date=args.get("from_date"),
+            to_date=args.get("to_date"),
+            sender_filter=args.get("sender_filter"),
+            max_results=int(args.get("max_results", 100)),
+        )
+        # Add a hint about which channels we actually scanned so the
+        # caller can see whether they should expand the search.
+        out["channels_scanned_count"] = len(target_channels)
+        out["contacts_scanned_count"] = len(target_contacts)
+        return _json(out)
+
     # ---- Meeting summaries (real AI Companion APIs) ----
 
     async def _h_get_meeting_summary(self, args):
@@ -231,12 +289,19 @@ class ZoomTools:
     async def _h_list_channels(self, args):
         if args.get("force_refresh"):
             await self._refresh_channels()
-        rows = self.cache.get_channels(starred_only=bool(args.get("starred_only")))
+        rows = self.cache.get_channels()
         if not rows:
             await self._refresh_channels()
-            rows = self.cache.get_channels(
-                starred_only=bool(args.get("starred_only"))
-            )
+            rows = self.cache.get_channels()
+        # Optional client-side name filter — Zoom's API doesn't expose a
+        # starred/favourite indicator on the channels endpoint, so we
+        # narrow by name substring instead.
+        name_filter = (args.get("name_filter") or "").strip().lower()
+        if name_filter:
+            rows = [
+                r for r in rows
+                if name_filter in (r.get("name") or "").lower()
+            ]
         return _json({"channels": rows, "count": len(rows)})
 
     async def _refresh_contacts(self):
