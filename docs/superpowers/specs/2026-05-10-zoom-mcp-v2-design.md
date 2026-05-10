@@ -89,6 +89,10 @@ zoom-mcp-server/
 │   ├── test_dispatcher.py
 │   ├── test_ai_companion.py
 │   ├── test_transcripts.py
+│   ├── test_files.py            # zoom_get_file MIME-gate behaviour
+│   ├── test_shared_spaces.py
+│   ├── test_message_inline.py   # reactions + attachments + thread inline data
+│   ├── test_mention_groups.py
 │   ├── test_paths.py
 │   └── test_log_filter.py
 ├── docs/
@@ -97,26 +101,30 @@ zoom-mcp-server/
 └── (NO setup.sh, zoom_wrapper.sh, .env.example, base_mcp_server.py at root)
 ```
 
-## 5. Tool Surface (read-only, 16 tools)
+## 5. Tool Surface (read-only, 20 tools)
 
-| Tool | Purpose | Cached? |
-|---|---|---|
-| `zoom_authenticate` | Trigger OAuth flow (browser) | — |
-| `zoom_revoke_authentication` | Wipe tokens, cache, logs | — |
-| `zoom_get_my_info` | Authenticated user info | yes (in-memory only, 24h) |
-| `zoom_resolve` | Resolve name/email to channel/contact/user ID | cache-backed |
-| `zoom_search` | **AI Companion search** across Meetings/Chat/Docs; ranked, contextual results | always live |
-| `zoom_ask` | **AI Companion grounded Q&A** — answers a question with citations from Meetings/Chat/Docs | always live |
-| `zoom_list_channels` | Cache-first list of channels user belongs to | yes (1h) |
-| `zoom_list_contacts` | Cache-first contacts list | yes (24h) |
-| `zoom_list_channel_members` | Members of a channel | yes (1h) |
-| `zoom_get_channel_history` | Auto-paginated raw message history; takes name or ID; date range; max_messages | always live |
-| `zoom_get_thread` | Messages under a thread (parent message ID + scope) | always live |
-| `zoom_list_pinned_messages` | Pinned messages in a channel | yes (5min) |
-| `zoom_list_bookmarks` | User's bookmarked messages | yes (5min) |
-| `zoom_list_meetings` | Past + upcoming meetings; filter by date/topic/participant | metadata cached |
-| `zoom_get_meeting` | Meeting details, participant list, recording-files manifest | metadata cached |
-| `zoom_get_meeting_transcript` | Download + parse transcript (VTT → text); never persisted | live, never cached |
+| # | Tool | Purpose | Cached? |
+|---|---|---|---|
+| 1 | `zoom_authenticate` | Trigger OAuth flow (browser) | — |
+| 2 | `zoom_revoke_authentication` | Wipe tokens, cache, logs | — |
+| 3 | `zoom_get_my_info` | Authenticated user info | yes (in-memory, 24h) |
+| 4 | `zoom_resolve` | Resolve name/email to channel/contact/user ID | cache-backed |
+| 5 | `zoom_search` | **AI Companion search** across Meetings/Chat/Docs | always live |
+| 6 | `zoom_ask` | **AI Companion grounded Q&A** with citations | always live |
+| 7 | `zoom_list_channels` | Channels user belongs to; includes `starred` field; `starred_only` filter | yes (1h) |
+| 8 | `zoom_list_contacts` | User's contacts | yes (24h) |
+| 9 | `zoom_list_channel_members` | Members of a channel | yes (1h) |
+| 10 | `zoom_get_channel_history` | Auto-paginated raw history with reactions + attachment metadata inline | always live |
+| 11 | `zoom_get_thread` | Messages under a thread, with reactions + attachments inline | always live |
+| 12 | `zoom_get_message` | Single message lookup (citation drill-down) | always live |
+| 13 | `zoom_get_file` | File metadata + text content for text/code files; metadata-only for binary | always live |
+| 14 | `zoom_list_pinned_messages` | Pinned messages in a channel | yes (5min) |
+| 15 | `zoom_list_bookmarks` | User's bookmarked messages | yes (5min) |
+| 16 | `zoom_list_mention_groups` | Mention groups (`@engineering`-style) in a channel | yes (1h) |
+| 17 | `zoom_list_shared_spaces` | Shared spaces user belongs to | yes (1h) |
+| 18 | `zoom_get_shared_space` | Shared-space detail + channels + members (via `include` arg) | yes (1h) |
+| 19 | `zoom_list_recordings` | List user's cloud recordings (recorded-only meetings) | metadata cached |
+| 20 | `zoom_get_meeting_transcript` | Download + parse transcript (VTT → text); never persisted on disk | live, never cached |
 
 ### 5.1 Tool argument shapes
 
@@ -124,9 +132,45 @@ All tools accept human-friendly identifiers where possible:
 - `channel`: name OR ID (resolved via cache)
 - `contact`: email OR ID
 - Date arguments: ISO-8601 strings
-- Cache-backed list tools (`zoom_list_channels`, `zoom_list_contacts`, `zoom_list_channel_members`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_meetings`) accept `force_refresh: bool = false` to bypass cache. Live-only tools (`zoom_search`, `zoom_ask`, `zoom_get_channel_history`, `zoom_get_thread`, `zoom_get_meeting_transcript`) do not.
+- Cache-backed list tools accept `force_refresh: bool = false` to bypass cache. Live-only tools do not.
 
-`zoom_search` and `zoom_ask` accept an optional `scope` argument: `"chat" | "meetings" | "docs" | "all"` (default `"all"`), and an optional `from_date` / `to_date`.
+`zoom_search` and `zoom_ask` accept an optional `scope` argument: `"chat" | "meetings" | "docs" | "all"` (default `"all"`), and optional `from_date` / `to_date`.
+
+### 5.2 Inline data on message responses
+
+`zoom_get_channel_history`, `zoom_get_thread`, and `zoom_get_message` return each message with:
+
+```json
+{
+  "message_id": "...",
+  "sender": {"id": "...", "display_name": "...", "email": "..."},
+  "timestamp": "2026-05-10T...",
+  "text": "...",
+  "reactions": [{"emoji": "👍", "count": 5, "users": ["...", "..."]}],
+  "files":     [{"file_id": "...", "name": "report.pdf", "mime_type": "application/pdf", "size": 1234567, "download_url": "<expires soon>"}],
+  "thread_parent_id": null,
+  "edited": false,
+  "deeplink": "https://..."
+}
+```
+
+Reactions and `files` are populated when the corresponding scopes are granted. `download_url` is included only on file objects (never persisted to cache).
+
+### 5.3 `zoom_get_file` behaviour
+
+- Always returns metadata: `{file_id, name, mime_type, size, sender, posted_at, channel_id}`
+- For text-like MIME types (`text/*`, `application/json`, `application/x-yaml`, `application/x-toml`, `application/xml`): downloads the file (capped at 1MB) and returns content under a `text` field.
+- For all other types: returns metadata only with a one-shot `download_url`. v2 does NOT decode images, PDFs, archives, or office docs.
+- Refuses to download files larger than 10MB even for text types.
+
+### 5.4 Shared spaces
+
+- `zoom_list_shared_spaces` returns `[{space_id, name, member_count, channel_count, owner_id}]`.
+- `zoom_get_shared_space(space_id, include="all"|"detail"|"channels"|"members")` returns whichever combination of detail/channels/members is requested. Default `include="detail"`.
+
+### 5.5 Mention groups
+
+- `zoom_list_mention_groups(channel)` returns `[{group_id, name, member_count, members: [user_id, ...]}]`. Useful signal for "what teams are addressed in this channel".
 
 ## 6. Cache Schema (SQLite)
 
@@ -140,9 +184,11 @@ CREATE TABLE channels (
   member_count  INTEGER,
   jid           TEXT,
   channel_url   TEXT,
+  starred       INTEGER,        -- 0/1; from chat_control endpoint
   cached_at     INTEGER NOT NULL
 );
-CREATE INDEX idx_channels_name ON channels(name);
+CREATE INDEX idx_channels_name    ON channels(name);
+CREATE INDEX idx_channels_starred ON channels(starred);
 
 CREATE TABLE contacts (
   id              TEXT PRIMARY KEY,
@@ -192,6 +238,39 @@ CREATE TABLE meeting_files (
   PRIMARY KEY (meeting_id, file_id)
 );
 -- NOTE: download_url is intentionally NOT stored. URLs are pre-signed and expire.
+
+CREATE TABLE shared_spaces (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  member_count  INTEGER,
+  channel_count INTEGER,
+  owner_id      TEXT,
+  cached_at     INTEGER NOT NULL
+);
+
+CREATE TABLE shared_space_channels (
+  space_id    TEXT NOT NULL,
+  channel_id  TEXT NOT NULL,
+  cached_at   INTEGER NOT NULL,
+  PRIMARY KEY (space_id, channel_id)
+);
+
+CREATE TABLE shared_space_members (
+  space_id   TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  role       TEXT,
+  cached_at  INTEGER NOT NULL,
+  PRIMARY KEY (space_id, user_id)
+);
+
+CREATE TABLE mention_groups (
+  channel_id    TEXT NOT NULL,
+  group_id      TEXT NOT NULL,
+  name          TEXT,
+  member_count  INTEGER,
+  cached_at     INTEGER NOT NULL,
+  PRIMARY KEY (channel_id, group_id)
+);
 ```
 
 ### 6.1 What is NOT cached on disk
@@ -200,20 +279,25 @@ CREATE TABLE meeting_files (
 |---|---|
 | Message bodies / text | Sensitive content; live fetch only |
 | Transcript text | Sensitive content; live fetch + VTT parse only |
-| Pre-signed download URLs | Time-limited credentials |
+| Attachment / file content (text or binary) | Sensitive; live fetch only via `zoom_get_file` |
+| Pre-signed download URLs (recordings, attachments) | Time-limited credentials |
+| Emoji-reaction details | Live with messages; not separately persisted |
 | Phone numbers, addresses | PII beyond what is necessary |
-| Search query strings | User-confidential intent |
+| Search query strings + AI Companion answers | User-confidential intent and content |
 
 ### 6.2 TTL Policy
 
 | Table | TTL | Rationale |
 |---|---|---|
 | `email_to_id` | 30 days | User IDs don't change in practice |
-| `channels` | 1 hour | Joins/leaves are infrequent |
+| `channels` | 1 hour | Joins/leaves and starred state change infrequently |
 | `contacts` | 24 hours | Directory changes slowly |
 | `channel_members` | 1 hour | Membership changes occasionally |
-| `meetings` (past) | 7 days | Past meetings are immutable |
-| `meetings` (upcoming) | 15 minutes | Schedules change frequently |
+| `meetings` (past/recorded) | 7 days | Past meetings are immutable |
+| `shared_spaces` | 1 hour | Org structure changes infrequently |
+| `shared_space_channels` | 1 hour | Same as above |
+| `shared_space_members` | 1 hour | Same as above |
+| `mention_groups` | 1 hour | Org structure changes infrequently |
 
 ### 6.3 Encryption
 
@@ -339,7 +423,7 @@ Output format:
 1. Sends initial request with `page_size=100` (or 50 where API caps lower).
 2. While `next_page_token` is non-empty and `len(items) < max_items`: send next page.
 3. Returns merged list, or stops at `max_items`.
-4. Used by: `zoom_list_channels`, `zoom_list_contacts`, `zoom_list_channel_members`, `zoom_get_channel_history`, `zoom_list_meetings`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`.
+4. Used by: `zoom_list_channels`, `zoom_list_contacts`, `zoom_list_channel_members`, `zoom_get_channel_history`, `zoom_list_recordings`, `zoom_list_pinned_messages`, `zoom_list_bookmarks`, `zoom_list_shared_spaces`, `zoom_get_shared_space`, `zoom_list_mention_groups`.
 
 `max_items` defaults to 1000 to prevent runaway loops; tools can raise the cap (e.g. `get_channel_history` defaults to 500).
 
@@ -370,9 +454,9 @@ Retry wrapper applied to every Zoom API call:
 
 OAuth-authenticated requests (currently bypass v1 retry logic at `utils/oauth_handler.py:294`) MUST go through this wrapper in v2.
 
-## 12. OAuth Scopes (granular, read-only minimum)
+## 12. OAuth Scopes (granular, read-only)
 
-The Zoom Marketplace app for v2 requests the following 20 granular scopes:
+The Zoom Marketplace app for v2 requests the following 27 granular scopes:
 
 **AI Companion** (powers `zoom_search`, `zoom_ask`):
 ```
@@ -383,11 +467,6 @@ ai_companion:read:search
 **Contacts:**
 ```
 contact:read:list_contacts
-```
-
-**Meetings:**
-```
-meeting:read:meeting
 ```
 
 **Recordings & transcripts:**
@@ -402,15 +481,24 @@ cloud_recording:read:content
 **Team Chat (read-only):**
 ```
 team_chat:read:channel
+team_chat:read:user_channel
 team_chat:read:list_user_channels
 team_chat:read:list_members
 team_chat:read:list_user_messages
 team_chat:read:user_message
 team_chat:read:thread_message
+team_chat:read:message_emoji
 team_chat:read:list_pinned_messages
 team_chat:read:list_bookmarks
+team_chat:read:file
+team_chat:read:chat_control
+team_chat:read:mention_group
 team_chat:read:list_contacts
 team_chat:read:contact
+team_chat:read:shared_space
+team_chat:read:list_shared_spaces
+team_chat:read:list_shared_space_channels
+team_chat:read:list_shared_space_members
 ```
 
 **User:**
@@ -424,12 +512,11 @@ user:read:user
 |---|---|
 | All `team_chat:write:*` and `team_chat:update:*` | Read-only design |
 | `imchat:userapp` | Not building an in-client app |
-| All `meeting:read:meeting_audio/video/chat/screenshare/transcript` | Real-time meeting integrations are out of scope; we use cloud-recording transcripts instead |
+| All `meeting:read:meeting_audio/video/chat/screenshare/transcript` | Real-time meeting integrations out of scope; cloud-recording transcripts cover the use case |
+| `meeting:read:meeting` | v2 surfaces only recorded meetings (via `cloud_recording:read:*`); non-recorded meeting metadata is out of scope |
 | `cloud_recording:read:recording_settings` | Recording settings not surfaced |
-| `team_chat:read:shared_space*` (4 scopes) | Shared spaces dropped from v2 |
-| `team_chat:read:file` | Attachment fetching not in v2 |
 | `team_chat:read:invite_link`, `:list_invitations`, `:list_approvals`, `:list_reminders`, `:list_scheduled_messages` | Admin/personal-state features out of scope |
-| `team_chat:read:list_custom_emojis`, `:message_emoji`, `:chat_control`, `:archive_channels`, `:user_channel`, `:list_user_sessions`, `:mention_group` | Low value; can be added later as needed |
+| `team_chat:read:list_custom_emojis`, `:archive_channels`, `:list_user_sessions` | Low value |
 
 The README and the MCPB `long_description` will list the requested scopes so the user can copy them when configuring their Zoom Marketplace app.
 
@@ -596,10 +683,14 @@ We considered: (a) single bundle with all platform wheels included, (b) install-
 | Unit | Log filter scrubber | Inputs with tokens / message bodies; assert redaction |
 | Unit | Auto-paginator | Mock httpx with synthetic next_page_tokens |
 | Unit | Retry wrapper | Mock httpx returning 429/5xx sequences |
-| Integration | OAuth flow | mock Zoom token endpoint via local httpx mock |
-| Integration | TLS minimum version | live call to api.zoom.us, assert TLSv1_2+ |
-| Integration | AI Companion search/ask | mocked Zoom AI Companion API; assert source-list mapping, citation parsing |
-| Smoke (manual) | End-to-end MCPB install on macOS, Linux, Windows | manual test plan in `docs/release-checklist.md` |
+| Unit | File mime-type gate | Assert `zoom_get_file` decodes only allow-listed text MIME types |
+| Integration | OAuth flow | Mock Zoom token endpoint via local httpx mock |
+| Integration | TLS minimum version | Live call to api.zoom.us, assert TLSv1_2+ |
+| Integration | AI Companion search/ask | Mocked AI Companion API; assert source-list mapping, citation parsing |
+| Integration | Shared spaces tools | Mocked endpoints; verify list/get with various `include` modes |
+| Integration | Reactions + attachments inline | Mock message responses with reactions/files; assert pass-through |
+| Integration | Mention groups | Mocked endpoint; assert response shape |
+| Smoke (manual) | End-to-end MCPB install on macOS, Linux, Windows | Manual test plan in `docs/release-checklist.md` |
 
 ## 17. Migration from v1
 
