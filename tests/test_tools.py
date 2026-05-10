@@ -83,6 +83,41 @@ def test_tool_annotations_group_correctly(authed_oauth, cache):
         )
 
 
+def test_legacy_tool_aliases_dispatch_to_new_handlers(authed_oauth, cache):
+    """An MCP host with a stale tool-list cache may send pre-rename names.
+    Those should still resolve to the right handler, not "Unknown tool"."""
+    from server.tools import _LEGACY_TOOL_ALIASES, ZoomTools
+
+    # Every legacy name must map to a current tool that exists in ENDPOINTS
+    tools = ZoomTools(authed_oauth, cache).list_tools()
+    current_names = {t.name for t in tools}
+    for old, new in _LEGACY_TOOL_ALIASES.items():
+        assert new in current_names, (
+            f"Alias {old!r} -> {new!r}, but {new!r} is not a registered tool"
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_alias_for_revoke_works(authed_oauth, cache, tmp_path):
+    """Calling the OLD name 'zoom_revoke_authentication' still wipes state."""
+    cache.put_channels([{"id": "c1", "name": "x", "type": 3}])
+    tools = ZoomTools(authed_oauth, cache)
+    out = await tools.call_tool("zoom_revoke_authentication", {})
+    assert "revoked" in out[0]["text"].lower()
+    assert authed_oauth.token_store.load() is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_alias_for_authenticate_when_already_valid(
+    authed_oauth, cache
+):
+    """Calling old 'zoom_authenticate' still routes to the auth handler."""
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_authenticate", {}
+    )
+    assert "Already authenticated" in out[0]["text"]
+
+
 def test_tool_annotations_split_into_three_groups(authed_oauth, cache):
     """Confirm exact bucket counts: 23 read-only, 1 write, 1 destructive."""
     tools = ZoomTools(authed_oauth, cache).list_tools()
