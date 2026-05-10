@@ -140,10 +140,10 @@ async def test_paginate_all_respects_max_items(httpx_mock):
     assert items == [1, 2, 3]
 
 
-def test_endpoints_table_has_21_tools():
+def test_endpoints_table_has_22_tools():
     from server.endpoints import ENDPOINTS
 
-    assert len(ENDPOINTS) == 21
+    assert len(ENDPOINTS) == 22
 
 
 def test_endpoints_have_unique_names():
