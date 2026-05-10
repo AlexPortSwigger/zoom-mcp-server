@@ -35,11 +35,27 @@ def cache(tmp_path):
     return CacheStore(tmp_path / "cache.db")
 
 
-def test_list_tools_returns_25(authed_oauth, cache):
+def test_list_tools_returns_21(authed_oauth, cache):
+    """v2.2.6: 21 tools after removing 4 unimplementable on the
+    User-managed PKCE OAuth app this connector ships:
+    - zoom_search_ai, zoom_search_ask (no public Zoom REST URL)
+    - zoom_message_mentions (no public Zoom REST URL)
+    - zoom_meeting_summary_list (Zoom requires :admin scope only
+      available to Server-to-Server OAuth apps)"""
     tools = ZoomTools(authed_oauth, cache).list_tools()
-    assert len(tools) == 25
+    assert len(tools) == 21
     assert all(hasattr(t, "name") for t in tools)
     assert all(hasattr(t, "description") for t in tools)
+    names = {t.name for t in tools}
+    for unimplementable in (
+        "zoom_search_ai",
+        "zoom_search_ask",
+        "zoom_message_mentions",
+        "zoom_meeting_summary_list",
+    ):
+        assert unimplementable not in names, (
+            f"{unimplementable} cannot work on User-managed OAuth"
+        )
 
 
 def test_list_tools_names_match_endpoints(authed_oauth, cache):
@@ -119,7 +135,7 @@ async def test_legacy_alias_for_authenticate_when_already_valid(
 
 
 def test_tool_annotations_split_into_three_groups(authed_oauth, cache):
-    """Confirm exact bucket counts: 23 read-only, 1 write, 1 destructive."""
+    """Confirm exact bucket counts: 19 read-only, 1 write, 1 destructive."""
     tools = ZoomTools(authed_oauth, cache).list_tools()
     read_only = [t for t in tools if t.annotations.readOnlyHint is True]
     write = [
@@ -130,7 +146,7 @@ def test_tool_annotations_split_into_three_groups(authed_oauth, cache):
     destructive = [
         t for t in tools if t.annotations.destructiveHint is True
     ]
-    assert len(read_only) == 23
+    assert len(read_only) == 19
     assert len(write) == 1
     assert len(destructive) == 1
     assert write[0].name == "zoom_auth_login"
@@ -145,7 +161,9 @@ async def test_call_tool_unknown_returns_error(authed_oauth, cache):
 
 @pytest.mark.asyncio
 async def test_call_tool_missing_required_arg(authed_oauth, cache):
-    out = await ZoomTools(authed_oauth, cache).call_tool("zoom_search_ai", {})
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_search_messages", {}
+    )
     assert "Missing required argument: query" in out[0]["text"]
 
 
