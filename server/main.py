@@ -92,6 +92,11 @@ async def run() -> None:
     tools_api = ZoomTools(oauth_handler=oauth, cache=cache)
     server = Server("zoom-integration")
 
+    # Eagerly trigger the browser auth flow on first launch if there's no
+    # session yet. Runs concurrently with the MCP server so stdin/stdout
+    # are not blocked. Subsequent launches with a refresh token are silent.
+    asyncio.create_task(oauth.maybe_auth_on_startup())
+
     @server.list_tools()
     async def _list_tools():
         return tools_api.list_tools()
