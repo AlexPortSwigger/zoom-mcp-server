@@ -1,6 +1,8 @@
 .env
-tokens/
-logs/
 .venv/
 __pycache__/
 *.pyc
+build/
+dist/
+*.egg-info/
+.pytest_cache/
