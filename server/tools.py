@@ -99,9 +99,12 @@ class ZoomTools:
         ok = await self.oauth.run_browser_flow()
         if not ok:
             return _err(
-                "Authentication failed. Common causes: port 8000 in use; "
-                "OAuth window closed before granting access; auth timed out "
-                "(5 min limit)."
+                "Authentication failed. Common causes: port 53682 in use "
+                "(check with `lsof -nP -iTCP:53682 -sTCP:LISTEN` and free "
+                "it); OAuth window closed before granting access; auth "
+                "timed out (5 min limit). See ~/Library/Logs/zoom-mcp/ "
+                "for the auth URL — you can paste it manually if the "
+                "browser didn't open."
             )
         r = await self.oauth.make_authenticated_request(
             "GET", f"{API_BASE}/users/me"
