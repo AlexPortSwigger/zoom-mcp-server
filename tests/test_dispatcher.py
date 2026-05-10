@@ -1,6 +1,7 @@
+import httpx
 import pytest
 
-from server.dispatcher import build_url, paginate_all
+from server.dispatcher import build_url, format_zoom_error, paginate_all
 from server import http_client
 
 
@@ -22,6 +23,83 @@ def test_build_url_substitutes_path_params():
 def test_build_url_with_no_params():
     url = build_url("https://api.zoom.us/v2", "/users/me")
     assert url == "https://api.zoom.us/v2/users/me"
+
+
+def test_format_zoom_error_4711_extracts_scope_and_action():
+    body = (
+        '{"code":4711,"message":"Invalid access token, does not contain '
+        'scopes:[meeting:read:list_meetings, '
+        'meeting:read:list_meetings:admin]."}'
+    )
+    msg = format_zoom_error(400, body)
+    assert "code 4711" in msg
+    assert "missing scope" in msg.lower()
+    assert "meeting:read:list_meetings" in msg
+    assert "meeting:read:list_meetings:admin" in msg
+    # Tells the user what to do
+    assert "re-authenticate" in msg.lower() or "marketplace" in msg.lower()
+
+
+def test_format_zoom_error_2300_marks_missing_endpoint():
+    body = '{"code":2300,"message":"This API endpoint is not recognized."}'
+    msg = format_zoom_error(404, body)
+    assert "code 2300" in msg
+    assert "not exposed" in msg.lower() or "not recognized" in msg.lower()
+
+
+def test_format_zoom_error_unknown_code_includes_message():
+    body = '{"code":300,"message":"Whatever"}'
+    msg = format_zoom_error(400, body)
+    assert "300" in msg
+    assert "Whatever" in msg
+
+
+def test_format_zoom_error_non_json_body_just_returns_truncated():
+    body = "<html>some upstream gateway thing</html>"
+    msg = format_zoom_error(502, body)
+    assert "502" in msg
+    assert "gateway thing" in msg
+
+
+def test_format_zoom_error_empty_body():
+    msg = format_zoom_error(400, "")
+    assert "400" in msg
+
+
+@pytest.mark.asyncio
+async def test_paginate_all_surfaces_zoom_error_body(httpx_mock):
+    # Simulates the deployed connector's "every channel returns 400"
+    # situation: paginate_all must include the Zoom error body in the
+    # raised exception so the caller can diagnose. Pre-fix, this raised
+    # `Client error '400 Bad Request' for url ...` with no body.
+    httpx_mock.add_response(
+        method="GET",
+        url="https://api.zoom.us/v2/meetings/meeting_summaries?page_size=100",
+        status_code=400,
+        json={
+            "code": 4711,
+            "message": (
+                "Invalid access token, does not contain "
+                "scopes:[meeting:read:list_summaries:admin]."
+            ),
+        },
+    )
+    with pytest.raises(httpx.HTTPStatusError) as ei:
+        await paginate_all(
+            "GET",
+            "https://api.zoom.us/v2/meetings/meeting_summaries",
+            items_key="summaries",
+            headers={"Authorization": "Bearer X"},
+        )
+    text = str(ei.value)
+    # Status code visible
+    assert "400" in text
+    # Zoom error code visible
+    assert "4711" in text
+    # Required scope visible
+    assert "meeting:read:list_summaries:admin" in text
+    # Tells the user what to do
+    assert "re-authenticate" in text.lower() or "marketplace" in text.lower()
 
 
 @pytest.mark.asyncio
@@ -62,10 +140,10 @@ async def test_paginate_all_respects_max_items(httpx_mock):
     assert items == [1, 2, 3]
 
 
-def test_endpoints_table_has_25_tools():
+def test_endpoints_table_has_21_tools():
     from server.endpoints import ENDPOINTS
 
-    assert len(ENDPOINTS) == 25
+    assert len(ENDPOINTS) == 21
 
 
 def test_endpoints_have_unique_names():
@@ -85,9 +163,7 @@ def test_endpoints_all_have_handler():
 def test_endpoint_by_name_lookup():
     from server.endpoints import endpoint_by_name
 
-    # AI Companion search
-    assert endpoint_by_name("zoom_search_ai")["handler"] == "ai_companion_search"
-    # Manual fan-out fallback
+    # Manual fan-out search across chat
     assert endpoint_by_name("zoom_search_messages")["handler"] == "search_messages"
 
 
@@ -96,3 +172,27 @@ def test_endpoint_by_name_raises_keyerror():
 
     with pytest.raises(KeyError):
         endpoint_by_name("zoom_unknown")
+
+
+def test_dead_endpoints_are_not_registered():
+    """v2.2.6: tools that cannot work on this connector's User-managed
+    PKCE OAuth app must NOT be registered. Adding them back without
+    a real fix will fail this test."""
+    from server.endpoints import ENDPOINTS
+
+    names = {e["name"] for e in ENDPOINTS}
+    assert "zoom_search_ai" not in names, (
+        "AI Companion REST search/ask endpoints don't exist publicly — "
+        "verified via Zoom's official AI Companion OpenAPI spec, which "
+        "lists only /aic/users/{userId}/conversation_archive."
+    )
+    assert "zoom_search_ask" not in names
+    assert "zoom_message_mentions" not in names, (
+        "/chat/channels/{id}/mention_groups returns code 2300 ('endpoint "
+        "not recognized') for every URL variant."
+    )
+    assert "zoom_meeting_summary_list" not in names, (
+        "Zoom requires meeting:read:list_summaries:admin which is exposed "
+        "only to Server-to-Server OAuth apps. Workaround: iterate "
+        "zoom_meeting_list + zoom_meeting_summary_get."
+    )

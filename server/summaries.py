@@ -1,34 +1,18 @@
-"""Zoom AI Companion meeting summaries.
+"""Zoom AI Companion meeting summaries (per-meeting fetch only).
 
-These are the *real* AI Companion APIs (`meeting_summary:read:summary`).
-The `/ai_companion/search` and `/ai_companion/ask` endpoints I originally
-planned do not exist publicly.
+The `list_meeting_summaries` endpoint at /v2/meetings/meeting_summaries
+demands `meeting:read:list_summaries:admin` — a `:admin` scope that's
+only exposed to Server-to-Server OAuth apps, not the User-managed PKCE
+app this connector uses. So we expose only the per-meeting fetcher
+below; callers can iterate `zoom_meeting_list` + `zoom_meeting_summary_get`
+for equivalent functionality on User-managed OAuth.
+
+Required scope (must be enabled on the Zoom dev app):
+  - meeting:read:summary  → get_meeting_summary
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from .dispatcher import paginate_all
 from .endpoints import API_BASE
-
-
-async def list_meeting_summaries(
-    oauth_handler,
-    *,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    headers = oauth_handler.get_auth_headers()
-    params: Dict[str, Any] = {}
-    if from_date:
-        params["from"] = from_date
-    if to_date:
-        params["to"] = to_date
-    return await paginate_all(
-        "GET",
-        f"{API_BASE}/meetings/meeting_summaries",
-        items_key="summaries",
-        headers=headers,
-        params=params,
-    )
 
 
 async def get_meeting_summary(oauth_handler, meeting_id: str) -> Dict[str, Any]:
