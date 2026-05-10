@@ -52,8 +52,8 @@ def test_list_tools_names_match_endpoints(authed_oauth, cache):
 def test_auth_tools_present(authed_oauth, cache):
     tools = ZoomTools(authed_oauth, cache).list_tools()
     names = {t.name for t in tools}
-    assert "zoom_authenticate" in names
-    assert "zoom_revoke_authentication" in names
+    assert "zoom_auth_login" in names
+    assert "zoom_auth_logout" in names
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_call_tool_unknown_returns_error(authed_oauth, cache):
 
 @pytest.mark.asyncio
 async def test_call_tool_missing_required_arg(authed_oauth, cache):
-    out = await ZoomTools(authed_oauth, cache).call_tool("zoom_search", {})
+    out = await ZoomTools(authed_oauth, cache).call_tool("zoom_search_ai", {})
     assert "Missing required argument: query" in out[0]["text"]
 
 
@@ -72,7 +72,7 @@ async def test_call_tool_missing_required_arg(authed_oauth, cache):
 async def test_revoke_clears_tokens_and_cache(authed_oauth, cache, tmp_path):
     cache.put_channels([{"id": "c1", "name": "x", "type": 3}])
     tools = ZoomTools(authed_oauth, cache)
-    out = await tools.call_tool("zoom_revoke_authentication", {})
+    out = await tools.call_tool("zoom_auth_logout", {})
     assert "revoked" in out[0]["text"].lower()
     assert authed_oauth.token_store.load() is None
     assert cache.get_channels() == []
@@ -81,21 +81,21 @@ async def test_revoke_clears_tokens_and_cache(authed_oauth, cache, tmp_path):
 @pytest.mark.asyncio
 async def test_authenticate_skips_when_already_valid(authed_oauth, cache):
     out = await ZoomTools(authed_oauth, cache).call_tool(
-        "zoom_authenticate", {}
+        "zoom_auth_login", {}
     )
     assert "Already authenticated" in out[0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_get_my_info_caches_in_memory(authed_oauth, cache):
+async def test_whoami_caches_in_memory(authed_oauth, cache):
     authed_oauth.make_authenticated_request = AsyncMock(
         return_value=httpx.Response(
             200, json={"id": "U1", "display_name": "Alex", "email": "a@b.com"}
         )
     )
     tools = ZoomTools(authed_oauth, cache)
-    out1 = await tools.call_tool("zoom_get_my_info", {})
-    out2 = await tools.call_tool("zoom_get_my_info", {})
+    out1 = await tools.call_tool("zoom_auth_whoami", {})
+    out2 = await tools.call_tool("zoom_auth_whoami", {})
     assert "Alex" in out1[0]["text"]
     assert "Alex" in out2[0]["text"]
     # second call should not have triggered another HTTP request
@@ -106,7 +106,7 @@ async def test_get_my_info_caches_in_memory(authed_oauth, cache):
 async def test_resolve_finds_channel_by_name(authed_oauth, cache):
     cache.put_channels([{"id": "C1", "name": "general", "type": 3}])
     out = await ZoomTools(authed_oauth, cache).call_tool(
-        "zoom_resolve", {"query": "general", "kind": "channel"}
+        "zoom_auth_resolve", {"query": "general", "kind": "channel"}
     )
     text = out[0]["text"]
     assert "channel" in text.lower()
@@ -114,7 +114,7 @@ async def test_resolve_finds_channel_by_name(authed_oauth, cache):
 
 
 @pytest.mark.asyncio
-async def test_list_channels_returns_cached(authed_oauth, cache):
+async def test_chat_channels_returns_cached(authed_oauth, cache):
     cache.put_channels(
         [
             {"id": "C1", "name": "general", "type": 3},
@@ -122,13 +122,13 @@ async def test_list_channels_returns_cached(authed_oauth, cache):
         ]
     )
     out = await ZoomTools(authed_oauth, cache).call_tool(
-        "zoom_list_channels", {}
+        "zoom_chat_channels", {}
     )
     assert '"count": 2' in out[0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_list_channels_starred_filter(authed_oauth, cache):
+async def test_chat_channels_starred_filter(authed_oauth, cache):
     cache.put_channels(
         [
             {"id": "C1", "name": "general", "type": 3, "starred": False},
@@ -136,7 +136,7 @@ async def test_list_channels_starred_filter(authed_oauth, cache):
         ]
     )
     out = await ZoomTools(authed_oauth, cache).call_tool(
-        "zoom_list_channels", {"starred_only": True}
+        "zoom_chat_channels", {"starred_only": True}
     )
     assert '"count": 1' in out[0]["text"]
     assert "devs" in out[0]["text"]
