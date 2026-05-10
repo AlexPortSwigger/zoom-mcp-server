@@ -57,13 +57,13 @@ class ZoomTools:
         except KeyError:
             return _err(f"Unknown tool: {name}")
 
-        if name == "zoom_authenticate":
+        if name == "zoom_auth_login":
             return await self._authenticate()
-        if name == "zoom_revoke_authentication":
+        if name == "zoom_auth_logout":
             return await self._revoke()
 
         if not await self.oauth.ensure_authenticated():
-            return _err("Authentication required. Use 'zoom_authenticate' first.")
+            return _err("Authentication required. Use 'zoom_auth_login' first.")
 
         for r in ep.get("required", []):
             if r not in args:
@@ -84,8 +84,7 @@ class ZoomTools:
     async def _authenticate(self) -> List[Dict[str, Any]]:
         if not self.oauth.token_store.is_expired():
             return _text(
-                "Already authenticated. Use zoom_revoke_authentication "
-                "first to re-auth."
+                "Already authenticated. Use zoom_auth_logout first to re-auth."
             )
         ok = await self.oauth.run_browser_flow()
         if not ok:
