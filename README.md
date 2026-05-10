@@ -20,18 +20,42 @@ Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config**
 
 The MCPB launches an OAuth browser flow on first install (PKCE, no client secret needed). Tokens are Fernet-encrypted on disk; transcripts and chat bodies are never persisted; the SQLite metadata cache stores names and IDs only.
 
-## Endpoint status (verified live 2026-05-10)
+## Endpoint status (verified live 2026-05-10 via `scripts/live_audit.py`)
 
-| Tool | Status |
-|---|---|
-| `zoom_auth_*` (login, logout, whoami, resolve) | ✅ Works |
-| `zoom_chat_channels`, `zoom_chat_channel_members`, `zoom_chat_contacts` | ✅ Works |
-| `zoom_chat_shared_spaces`, `zoom_chat_shared_space_get` | ✅ Works |
-| `zoom_message_history`, `zoom_message_thread`, `zoom_message_get` | ✅ Works |
-| `zoom_message_pinned`, `zoom_message_bookmarks`, `zoom_message_file` | ✅ Works |
-| `zoom_meeting_get`, `zoom_meeting_recordings`, `zoom_meeting_transcript` | ✅ Works |
-| `zoom_search_messages` | ✅ Works (Zoom server-side caps each search to ~24h regardless of `from_date`/`to_date`; pass `channel_filter` in workspaces with hundreds of channels) |
-| `zoom_meeting_list`, `zoom_meeting_summary_list`, `zoom_meeting_summary_get` | ⚠️ Need extra OAuth scopes — see below |
+15 PASS / 1 FAIL / 6 SKIP (skips are tools we can't exercise without specific test data, e.g. a recorded meeting transcript or a chat file ID):
+
+| Tool | Status | Live evidence |
+|---|---|---|
+| `zoom_auth_whoami` | ✅ | Returned profile |
+| `zoom_chat_channels` | ✅ | 1,548 channels |
+| `zoom_chat_channel_members` | ✅ | 78 members in #Devs |
+| `zoom_chat_contacts` | ✅ | 209 contacts |
+| `zoom_chat_shared_spaces` | ✅ | 0 spaces (legitimate empty) |
+| `zoom_message_history` | ✅ | 5 messages from #Devs today |
+| `zoom_message_get` / `zoom_message_thread` / `zoom_message_pinned` | ✅ | Returned real data |
+| `zoom_message_bookmarks` | ✅ | 1 bookmark |
+| `zoom_search_messages` | ✅ | 6 hits for "the" |
+| `zoom_meeting_list` | ✅ | 10 previous meetings |
+| `zoom_meeting_recordings` | ✅ | 0 recordings (legitimate empty for this user) |
+| `zoom_meeting_get` | ✅ | Returned meeting topic + manifest |
+| `zoom_meeting_summary_get` | ✅ | Endpoint reachable (404 for meetings without AI summaries is correct behaviour) |
+| `zoom_meeting_summary_list` | ❌ | Still 4711 — Zoom asks for `meeting:read:list_summaries:admin` (the `:admin` variant, which may not be exposed for User-managed OAuth apps. See "Known limitations" below.) |
+| `zoom_chat_shared_space_get`, `zoom_message_file`, `zoom_meeting_transcript`, `zoom_auth_login`/`logout`/`resolve` | ⏭ skip | Need specific test data we don't have (a recorded meeting transcript, a chat file ID, a shared space) or are interactive/destructive |
+
+When a tool fails with a missing-scope error you'll see a single-line message like `HTTP 400 (Zoom code 4711): Zoom OAuth app missing scope. Required: [meeting:read:list_summaries:admin]. Fix: a Zoom Marketplace admin must add the missing scope(s)…` — the message names exactly what to add and where.
+
+### Known limitation: `zoom_meeting_summary_list`
+
+Zoom's `/meetings/meeting_summaries` endpoint demands the `:admin` scope variants:
+- `meeting:read:list_summaries:admin`
+- `meeting:read:summary:admin`
+- `meeting:read:meeting:admin`
+
+Per [the dev forum](https://devforum.zoom.us/t/cannot-retrieve-ai-companion-meeting-summary-body-via-api-missing-meetingsummary-master-scope/142967), these `:admin` scopes exist but appear to be exposed only to **Server-to-Server OAuth** apps, not the User-managed PKCE OAuth app this connector currently uses. The non-`:admin` variants (e.g. `meeting:read:list_meetings`, which we use successfully) cover most of the equivalent surface, but there's no non-`:admin` equivalent for `list_summaries`.
+
+`zoom_meeting_summary_get` works fine — it uses the non-`:admin` `meeting:read:summary` scope and only needs a meeting UUID. The deficit is *list*-style summary discovery, not per-meeting fetch. To work around: use `zoom_meeting_list` to find recent meetings, then `zoom_meeting_summary_get` per meeting.
+
+If you want full `list_summaries` access you'd need to either (a) move this connector to a Server-to-Server OAuth app type, or (b) get the `:admin` scopes exposed for User-managed apps (Zoom support request).
 
 When a tool fails with a missing-scope error you'll see a single-line message like `HTTP 400 (Zoom code 4711): Zoom OAuth app missing scope. Required: [meeting:read:list_meetings]. Fix: a Zoom Marketplace admin must add the missing scope(s)…` — the message names exactly what to add and where.
 
