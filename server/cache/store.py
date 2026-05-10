@@ -75,13 +75,29 @@ class CacheStore:
 
     def put_contacts(self, contacts: Iterable[Dict[str, Any]]) -> None:
         ts = _now_ms()
-        rows = [
-            (
-                c["id"], c.get("email", ""), c.get("display_name"),
-                c.get("dept"), c.get("presence_status"), ts,
+        rows = []
+        for c in contacts:
+            # Zoom returns first_name + last_name on contacts; some
+            # responses also include "name" or "display_name". Build a
+            # display string from whichever is available.
+            display = (
+                c.get("display_name")
+                or c.get("name")
+                or " ".join(
+                    p for p in [c.get("first_name"), c.get("last_name")] if p
+                )
+                or c.get("email", "")
             )
-            for c in contacts
-        ]
+            rows.append(
+                (
+                    c["id"],
+                    c.get("email", ""),
+                    display,
+                    c.get("dept"),
+                    c.get("presence_status"),
+                    ts,
+                )
+            )
         self._conn.executemany(
             "INSERT OR REPLACE INTO contacts "
             "(id, email, display_name, dept, presence_status, cached_at) "
