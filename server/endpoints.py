@@ -248,28 +248,6 @@ ENDPOINTS: List[Dict[str, Any]] = [
         "required": ["meeting_id"],
     },
     {
-        "name": "zoom_meeting_summary_list",
-        "summary": (
-            "List AI Companion-generated meeting summaries available to the "
-            "user. Use this to discover which meetings have a summary "
-            "(then call zoom_meeting_summary_get for the body), e.g. "
-            "'show me summaries from this week's meetings'. Returns "
-            "meeting_uuid, topic, start_time, summary_start_time, "
-            "summary_end_time, summary_status."
-        ),
-        "handler": "list_meeting_summaries",
-        "body": {
-            "from_date": {
-                "type": "string",
-                "description": "yyyy-MM-dd lower bound (required for ranges).",
-            },
-            "to_date": {
-                "type": "string",
-                "description": "yyyy-MM-dd upper bound. Max ~1 month window.",
-            },
-        },
-    },
-    {
         "name": "zoom_meeting_summary_get",
         "summary": (
             "Fetch the full AI Companion summary body for one meeting — "
