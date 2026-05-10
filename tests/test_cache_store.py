@@ -57,6 +57,22 @@ def test_channel_members_round_trip(tmp_path):
     assert {m["user_id"] for m in members} == {"u1", "u2"}
 
 
+def test_put_contacts_builds_display_from_first_last_name(tmp_path):
+    """Zoom returns first_name + last_name on contacts, not display_name."""
+    store = CacheStore(tmp_path / "cache.db")
+    store.put_contacts([
+        {"id": "U1", "email": "a@b.com", "first_name": "Alice", "last_name": "Smith"},
+        {"id": "U2", "email": "b@b.com", "first_name": "Bob"},  # no last_name
+        {"id": "U3", "email": "c@b.com"},  # nothing — fallback to email
+        {"id": "U4", "email": "d@b.com", "display_name": "Dave Direct"},  # explicit display_name preferred
+    ])
+    rows = {r["id"]: r for r in store.get_contacts()}
+    assert rows["U1"]["display_name"] == "Alice Smith"
+    assert rows["U2"]["display_name"] == "Bob"
+    assert rows["U3"]["display_name"] == "c@b.com"
+    assert rows["U4"]["display_name"] == "Dave Direct"
+
+
 def test_clear_wipes_everything(tmp_path):
     store = CacheStore(tmp_path / "cache.db")
     store.put_channels([{"id": "c1", "name": "x", "type": 3}])

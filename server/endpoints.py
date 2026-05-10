@@ -1,4 +1,4 @@
-"""Route table for all 22 Zoom MCP tools.
+"""Route table for Zoom MCP tools.
 
 Drives both tool registration (in tools.py) and dispatch.
 
@@ -6,7 +6,8 @@ Each entry shape:
   name:        tool name (zoom_*)
   summary:     short description for tool list
   handler:     name of method on ZoomTools (e.g. "list_channels" -> _h_list_channels);
-               None for tools handled inline by call_tool (zoom_authenticate, zoom_revoke_authentication).
+               None for tools handled inline by call_tool (zoom_authenticate,
+               zoom_revoke_authentication).
   body:        dict[name -> {type, description}] declaring tool input properties
   required:    list of required arg names
 """
@@ -32,36 +33,6 @@ ENDPOINTS: List[Dict[str, Any]] = [
         "handler": "get_my_info",
     },
 
-    # ---------- AI Companion ----------
-    {
-        "name": "zoom_search",
-        "summary": "AI Companion search across Zoom Meetings, Chat, and Docs.",
-        "handler": "ai_companion_search",
-        "body": {
-            "query": {"type": "string", "description": "Search query"},
-            "scope": {"type": "string", "description": "chat|meetings|docs|all"},
-            "from_date": {"type": "string", "description": "ISO-8601 start date"},
-            "to_date": {"type": "string", "description": "ISO-8601 end date"},
-            "max_results": {
-                "type": "integer",
-                "description": "Maximum results to return (default 50)",
-            },
-        },
-        "required": ["query"],
-    },
-    {
-        "name": "zoom_ask",
-        "summary": "AI Companion grounded Q&A across Zoom Meetings, Chat, and Docs.",
-        "handler": "ai_companion_ask",
-        "body": {
-            "question": {"type": "string", "description": "Question to ask"},
-            "scope": {"type": "string", "description": "chat|meetings|docs|all"},
-            "from_date": {"type": "string", "description": "ISO-8601 start date"},
-            "to_date": {"type": "string", "description": "ISO-8601 end date"},
-        },
-        "required": ["question"],
-    },
-
     # ---------- Resolve ----------
     {
         "name": "zoom_resolve",
@@ -72,6 +43,32 @@ ENDPOINTS: List[Dict[str, Any]] = [
             "kind": {
                 "type": "string",
                 "description": "channel|contact|auto (default auto)",
+            },
+        },
+        "required": ["query"],
+    },
+
+    # ---------- Cross-channel search (manual fan-out) ----------
+    {
+        "name": "zoom_search_messages",
+        "summary": (
+            "Search messages across all your channels and DMs. Fans out "
+            "scoped searches in parallel and merges results, sorted by "
+            "recency. Use this when you want to find a topic without "
+            "knowing the specific channel."
+        ),
+        "handler": "search_messages",
+        "body": {
+            "query": {"type": "string", "description": "Search query string"},
+            "from_date": {"type": "string", "description": "ISO-8601 start date"},
+            "to_date": {"type": "string", "description": "ISO-8601 end date"},
+            "channel_filter": {
+                "type": "string",
+                "description": "Optional substring to filter channel names",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Max results to return (default 100)",
             },
         },
         "required": ["query"],
@@ -115,7 +112,8 @@ ENDPOINTS: List[Dict[str, Any]] = [
     {
         "name": "zoom_get_channel_history",
         "summary": (
-            "Auto-paginated message history with reactions and attachment metadata"
+            "Auto-paginated message history with reactions and attachment "
+            "metadata inline"
         ),
         "handler": "get_channel_history",
         "body": {
@@ -155,48 +153,34 @@ ENDPOINTS: List[Dict[str, Any]] = [
         "required": ["message_id"],
     },
 
-    # ---------- Files ----------
-    {
-        "name": "zoom_get_file",
-        "summary": (
-            "File metadata; for text/code MIME types, also returns content (max 1MB)"
-        ),
-        "handler": "get_file",
-        "body": {"file_id": {"type": "string", "description": "Chat file ID"}},
-        "required": ["file_id"],
-    },
-
-    # ---------- Pinned / bookmarks / mention groups ----------
+    # ---------- Pinned messages (unverified — may 404) ----------
     {
         "name": "zoom_list_pinned_messages",
-        "summary": "Pinned messages in a channel",
+        "summary": (
+            "Pinned messages in a channel. Endpoint is unverified against "
+            "Zoom docs; may return 404."
+        ),
         "handler": "list_pinned_messages",
         "body": {"channel": {"type": "string", "description": "Channel name or ID"}},
         "required": ["channel"],
     },
-    {
-        "name": "zoom_list_bookmarks",
-        "summary": "User's bookmarked messages",
-        "handler": "list_bookmarks",
-    },
-    {
-        "name": "zoom_list_mention_groups",
-        "summary": "Mention groups (e.g. @engineering) in a channel",
-        "handler": "list_mention_groups",
-        "body": {"channel": {"type": "string", "description": "Channel name or ID"}},
-        "required": ["channel"],
-    },
 
-    # ---------- Shared spaces ----------
+    # ---------- Shared spaces (unverified paths — may 404) ----------
     {
         "name": "zoom_list_shared_spaces",
-        "summary": "Shared spaces the user belongs to",
+        "summary": (
+            "Shared spaces the user belongs to. Endpoint paths added to "
+            "Zoom in May 2024 but exact list path is unverified; may 404."
+        ),
         "handler": "list_shared_spaces",
         "body": {"force_refresh": {"type": "boolean", "description": "Bypass cache"}},
     },
     {
         "name": "zoom_get_shared_space",
-        "summary": "Shared-space detail; include channels/members via include arg",
+        "summary": (
+            "Shared-space detail; include channels/members via include arg. "
+            "Sub-paths unverified."
+        ),
         "handler": "get_shared_space",
         "body": {
             "space_id": {"type": "string", "description": "Shared space ID"},
@@ -247,6 +231,29 @@ ENDPOINTS: List[Dict[str, Any]] = [
         "name": "zoom_get_meeting_transcript",
         "summary": "Download and parse a meeting transcript (VTT → text)",
         "handler": "get_meeting_transcript",
+        "body": {
+            "meeting_id": {"type": "string", "description": "Meeting ID or UUID"},
+        },
+        "required": ["meeting_id"],
+    },
+
+    # ---------- Meeting summaries (real Zoom AI Companion API) ----------
+    {
+        "name": "zoom_list_meeting_summaries",
+        "summary": (
+            "List AI-generated meeting summaries for the user. Requires "
+            "Zoom AI Companion enabled on the account."
+        ),
+        "handler": "list_meeting_summaries",
+        "body": {
+            "from_date": {"type": "string", "description": "yyyy-MM-dd"},
+            "to_date": {"type": "string", "description": "yyyy-MM-dd"},
+        },
+    },
+    {
+        "name": "zoom_get_meeting_summary",
+        "summary": "Get the AI-generated summary for a specific meeting",
+        "handler": "get_meeting_summary",
         "body": {
             "meeting_id": {"type": "string", "description": "Meeting ID or UUID"},
         },

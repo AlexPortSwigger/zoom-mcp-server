@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 from mcp.types import Tool
 
-from . import ai_companion, files, messages, shared_spaces, transcripts
+from . import messages, search, shared_spaces, summaries, transcripts
 from .cache.store import CacheStore
 from .dispatcher import paginate_all
 from .endpoints import API_BASE, ENDPOINTS, endpoint_by_name
@@ -165,27 +165,42 @@ class ZoomTools:
             }
         )
 
-    # ---- AI Companion ----
+    # ---- Cross-channel search (manual fan-out) ----
 
-    async def _h_ai_companion_search(self, args):
-        out = await ai_companion.search(
+    async def _h_search_messages(self, args):
+        # Make sure we have channels and contacts cached for the fan-out
+        channels = self.cache.get_channels()
+        if not channels:
+            await self._refresh_channels()
+            channels = self.cache.get_channels()
+        contacts = self.cache.get_contacts()
+        if not contacts:
+            await self._refresh_contacts()
+            contacts = self.cache.get_contacts()
+        out = await search.search_messages(
             self.oauth,
+            channels=channels,
+            contacts=contacts,
             query=args["query"],
-            scope=args.get("scope"),
             from_date=args.get("from_date"),
             to_date=args.get("to_date"),
-            max_results=int(args.get("max_results", 50)),
+            channel_filter=args.get("channel_filter"),
+            max_results=int(args.get("max_results", 100)),
         )
         return _json(out)
 
-    async def _h_ai_companion_ask(self, args):
-        out = await ai_companion.ask(
+    # ---- Meeting summaries (real AI Companion APIs) ----
+
+    async def _h_list_meeting_summaries(self, args):
+        items = await summaries.list_meeting_summaries(
             self.oauth,
-            question=args["question"],
-            scope=args.get("scope"),
             from_date=args.get("from_date"),
             to_date=args.get("to_date"),
         )
+        return _json({"summaries": items, "count": len(items)})
+
+    async def _h_get_meeting_summary(self, args):
+        out = await summaries.get_meeting_summary(self.oauth, args["meeting_id"])
         return _json(out)
 
     # ---- channels & contacts ----
@@ -343,13 +358,7 @@ class ZoomTools:
         )
         return _json(out)
 
-    # ---- files ----
-
-    async def _h_get_file(self, args):
-        out = await files.get_file(self.oauth, args["file_id"])
-        return _json(out)
-
-    # ---- pinned, bookmarks, mention groups ----
+    # ---- pinned messages (unverified — may 404) ----
 
     async def _h_list_pinned_messages(self, args):
         channel_id = await self._resolve_channel_id(args["channel"])
@@ -357,24 +366,6 @@ class ZoomTools:
             return _err(f"Unknown channel: {args['channel']!r}")
         items = await messages.list_pinned_messages(self.oauth, channel_id)
         return _json({"messages": items, "count": len(items)})
-
-    async def _h_list_bookmarks(self, args):
-        items = await messages.list_bookmarks(self.oauth)
-        return _json({"bookmarks": items, "count": len(items)})
-
-    async def _h_list_mention_groups(self, args):
-        channel_id = await self._resolve_channel_id(args["channel"])
-        if not channel_id:
-            return _err(f"Unknown channel: {args['channel']!r}")
-        items = await messages.list_mention_groups(self.oauth, channel_id)
-        self.cache.put_mention_groups(channel_id, items)
-        return _json(
-            {
-                "channel_id": channel_id,
-                "mention_groups": items,
-                "count": len(items),
-            }
-        )
 
     # ---- shared spaces ----
 
