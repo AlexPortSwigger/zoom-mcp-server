@@ -1,72 +1,78 @@
 # Zoom MCP Server v2.2
 
-Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config beta** — no client secret to enter, no setup script. Distributed as a `.mcpb` bundle.
+Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config** — no client secret to enter, no setup script. Distributed as a `.mcpb` bundle.
 
-## What works today
+## What this connector lets Claude do
 
-| Area | Status |
+| Use case | Tool route |
 |---|---|
-| Auth (`zoom_auth_*`) | ✅ Works |
-| Chat browse (`zoom_chat_*`, `zoom_message_*`) | ✅ Works |
-| Chat search (`zoom_search_messages`) | ✅ Works (Zoom caps each search to ~24h regardless of `from`/`to`) |
-| Single meeting (`zoom_meeting_get`, `zoom_meeting_transcript`) | ✅ Works |
-| Recordings (`zoom_meeting_recordings`) | ✅ Works |
-| List meetings (`zoom_meeting_list`) | ⚠️ Needs `meeting:read:list_meetings` scope added in Zoom dev portal |
-| Meeting summaries (`zoom_meeting_summary_list`) | ⚠️ Needs `meeting:read:list_summaries:admin` scope added in Zoom dev portal |
-| AI Companion (`zoom_search_ai`, `zoom_search_ask`) | ❌ Zoom returns `code:2300 — endpoint not recognized`; these REST endpoints aren't exposed publicly. Use `zoom_search_messages` instead. |
+| "What's been said in #channel today?" | `zoom_message_history(channel, from_date, to_date)` |
+| "Summarise #channel this week" | `zoom_message_history` over the date range, then Claude summarises |
+| "What did <person> say in #channel?" | `zoom_message_history` for the channel, filter by `sender` in the result |
+| "Catch me up on my DMs with <person>" | `zoom_message_history(contact=<email>)` |
+| "Find anything about <topic> across chat" | `zoom_search_messages(query, channel_filter?)` |
+| "What channels am I in?" | `zoom_chat_channels` (use `starred_only=true` for the active ones) |
+| "Who's in #channel?" | `zoom_chat_channel_members` |
+| "What meetings do I have today?" | `zoom_meeting_list(type=upcoming)` |
+| "Summary of meeting X" | `zoom_meeting_summary_get(meeting_id)` |
+| "Recent meeting summaries" | `zoom_meeting_summary_list(from_date, to_date)` |
+| "Transcript of meeting X" | `zoom_meeting_transcript(meeting_id)` |
 
-When a tool fails with a missing-scope error you'll see a single-line message like `HTTP 400 (Zoom code 4711): Zoom OAuth app missing scope. Required: [meeting:read:list_meetings]. Fix: a Zoom Marketplace admin must add the missing scope(s)…` — that tells you exactly what to add and where.
+The MCPB launches an OAuth browser flow on first install (PKCE, no client secret needed). Tokens are Fernet-encrypted on disk; transcripts and chat bodies are never persisted; the SQLite metadata cache stores names and IDs only.
 
-## Install for Swiggers (zero config)
+## Endpoint status (verified live 2026-05-10)
 
-1. Download `zoom-mcp-<your-platform>.mcpb` from internal share
+| Tool | Status |
+|---|---|
+| `zoom_auth_*` (login, logout, whoami, resolve) | ✅ Works |
+| `zoom_chat_channels`, `zoom_chat_channel_members`, `zoom_chat_contacts` | ✅ Works |
+| `zoom_chat_shared_spaces`, `zoom_chat_shared_space_get` | ✅ Works |
+| `zoom_message_history`, `zoom_message_thread`, `zoom_message_get` | ✅ Works |
+| `zoom_message_pinned`, `zoom_message_bookmarks`, `zoom_message_file` | ✅ Works |
+| `zoom_meeting_get`, `zoom_meeting_recordings`, `zoom_meeting_transcript` | ✅ Works |
+| `zoom_search_messages` | ✅ Works (Zoom server-side caps each search to ~24h regardless of `from_date`/`to_date`; pass `channel_filter` in workspaces with hundreds of channels) |
+| `zoom_meeting_list`, `zoom_meeting_summary_list`, `zoom_meeting_summary_get` | ⚠️ Need extra OAuth scopes — see below |
+
+When a tool fails with a missing-scope error you'll see a single-line message like `HTTP 400 (Zoom code 4711): Zoom OAuth app missing scope. Required: [meeting:read:list_meetings]. Fix: a Zoom Marketplace admin must add the missing scope(s)…` — the message names exactly what to add and where.
+
+### Tools removed in v2.2.5
+
+These three tools' Zoom REST URLs do not exist publicly — verified against Zoom's published [AI Companion OpenAPI spec](https://developers.zoom.us/docs/api/ai-companion/) (one endpoint, archive only) and exhaustive URL probing:
+
+- `zoom_search_ai`, `zoom_search_ask` — the `ai_companion:read:search`/`:ask` scopes are advertised by Zoom but no REST URL accepts them. The only AI Companion REST endpoint that exists is `GET /v2/aic/users/{userId}/conversation_archive` (admin-only compliance archive download).
+- `zoom_message_mentions` — `/chat/channels/{id}/mention_groups` returns code 2300 ("endpoint not recognized") for every URL variant tested.
+
+If Zoom ships these endpoints in future, re-adding the tools is a one-line change in `server/endpoints.py`.
+
+## Install (zero config)
+
+1. Download `zoom-mcp-<your-platform>.mcpb`
 2. Double-click to install in Claude Desktop (no prompts, nothing to enter)
-3. In Claude: **"authenticate with Zoom"**
-4. Browser opens → log in to Zoom → click **Allow**
-5. Browser auto-closes; Claude tells you you're authenticated
-6. Done
+3. The connector launches the browser OAuth flow on first run — log in to Zoom, click **Allow**
+4. Browser auto-closes; Claude tells you you're authenticated
+5. Done
 
-The MCPB has the PortSwigger Zoom dev app's **public client ID** baked in, and uses **PKCE** (RFC 7636) — no client secret anywhere.
+The MCPB has the PortSwigger Zoom dev app's **public client ID** baked in, and uses **PKCE** (RFC 7636) — no client secret anywhere, and no environment variables required.
 
-## What's available (25 tools)
+## What's available (22 tools)
 
 Each tool has standard MCP annotations, so Claude Desktop's connector-permissions screen groups them into:
 
-- **Read-only (23 tools)** — every Zoom API call we expose
+- **Read-only (20 tools)** — every Zoom API call we expose
 - **Write (1 tool)** — `zoom_auth_login` (saves OAuth tokens locally)
 - **Destructive (1 tool)** — `zoom_auth_logout` (wipes local tokens, cache, in-memory state)
 
-Within those buckets, tool names share group prefixes (`zoom_auth_*`, `zoom_chat_*`, `zoom_meeting_*`, `zoom_message_*`, `zoom_search_*`) so they alphabetise into tidy sub-sections in any client that sorts by name:
+Tool names share group prefixes (`zoom_auth_*`, `zoom_chat_*`, `zoom_meeting_*`, `zoom_message_*`, `zoom_search_*`):
 
-**`zoom_auth_*` — authentication & profile**
-- `zoom_auth_login` — start the OAuth flow
-- `zoom_auth_logout` — wipe local session
-- `zoom_auth_resolve` — name/email → ID
-- `zoom_auth_whoami` — authenticated user's profile
+**`zoom_auth_*`** — `zoom_auth_login`, `zoom_auth_logout`, `zoom_auth_resolve`, `zoom_auth_whoami`
 
-**`zoom_chat_*` — channels, contacts, shared spaces**
-- `zoom_chat_channels` (with `starred_only` filter)
-- `zoom_chat_channel_members`
-- `zoom_chat_contacts`
-- `zoom_chat_shared_spaces`
-- `zoom_chat_shared_space_get`
+**`zoom_chat_*`** — `zoom_chat_channels` (with `starred_only`), `zoom_chat_channel_members`, `zoom_chat_contacts`, `zoom_chat_shared_spaces`, `zoom_chat_shared_space_get`
 
-**`zoom_meeting_*` — meetings, recordings, transcripts, AI summaries**
-- `zoom_meeting_list`, `zoom_meeting_get`
-- `zoom_meeting_recordings`, `zoom_meeting_transcript`
-- `zoom_meeting_summary_list`, `zoom_meeting_summary_get`
+**`zoom_meeting_*`** — `zoom_meeting_list`, `zoom_meeting_get`, `zoom_meeting_recordings`, `zoom_meeting_transcript`, `zoom_meeting_summary_list`, `zoom_meeting_summary_get`
 
-**`zoom_message_*` — messages, threads, files, pinned, bookmarks, mentions**
-- `zoom_message_history` — auto-paginated channel/DM history with reactions + attachment metadata inline
-- `zoom_message_thread`, `zoom_message_get`, `zoom_message_file`
-- `zoom_message_pinned`, `zoom_message_bookmarks`, `zoom_message_mentions`
+**`zoom_message_*`** — `zoom_message_history` (auto-paginated channel/DM history with reactions + attachment metadata inline), `zoom_message_thread`, `zoom_message_get`, `zoom_message_file`, `zoom_message_pinned`, `zoom_message_bookmarks`
 
-**`zoom_search_*` — AI Companion + manual fan-out**
-- `zoom_search_ai` — AI Companion cross-source search
-- `zoom_search_ask` — AI Companion grounded Q&A with citations
-- `zoom_search_messages` — manual parallel fan-out (substring fallback)
-
-Attachments and emoji reactions appear inline on every message returned by the `zoom_message_*` tools.
+**`zoom_search_*`** — `zoom_search_messages` (parallel fan-out keyword search across chat)
 
 ## How auth works
 
@@ -85,35 +91,16 @@ Claude → Browser → zoom.us/oauth/authorize?code_challenge=… → user click
 
 PKCE `code_verifier` never leaves the machine. State value verified on the OAuth callback for CSRF protection.
 
-## One-time PortSwigger admin setup (already done)
+The browser flow is launched automatically on connector startup if there's no valid session yet (`maybe_auth_on_startup` in `server/main.py`). On subsequent launches with a refresh token, auth is silent.
 
-1. Zoom Marketplace **dev app** with **Use Public Client OAuth** enabled
-2. OAuth redirect URL: `http://localhost:8000/oauth/callback`
-3. App is **User-managed** so individual Swiggers authorise it themselves
-4. Scopes: see [list below](#oauth-scopes)
-
-## Security & data handling
-
-- **TLS 1.2+ enforced** on all Zoom traffic
-- **PKCE** — no `client_secret` ever distributed or stored
-- **OAuth tokens Fernet-encrypted at rest** (mode 0600)
-- **SQLite metadata cache** stores channel/contact/meeting names and IDs only — **no message bodies or transcript content on disk**
-- **Logs scrub** bearer tokens, refresh tokens, message bodies, transcript text, search queries, and email addresses
-- **`zoom_revoke_authentication`** wipes everything
-
-## OAuth scopes
+## OAuth scopes the dev app must have configured
 
 ```
-ai_companion:read:ask
-ai_companion:read:search
+# Profile / contacts
+user:read:user
 contact:read:list_contacts
-meeting:read:meeting
-meeting_summary:read:summary
-cloud_recording:read:list_user_recordings
-cloud_recording:read:list_recording_files
-cloud_recording:read:recording
-cloud_recording:read:meeting_transcript
-cloud_recording:read:content
+
+# Team Chat (read-only)
 team_chat:read:channel
 team_chat:read:user_channel
 team_chat:read:list_user_channels
@@ -126,15 +113,39 @@ team_chat:read:list_pinned_messages
 team_chat:read:list_bookmarks
 team_chat:read:file
 team_chat:read:chat_control
-team_chat:read:mention_group
 team_chat:read:list_contacts
 team_chat:read:contact
 team_chat:read:shared_space
 team_chat:read:list_shared_spaces
 team_chat:read:list_shared_space_channels
 team_chat:read:list_shared_space_members
-user:read:user
+
+# Meetings + recordings
+meeting:read:meeting
+meeting:read:list_meetings        ← needed for zoom_meeting_list
+meeting:read:list_summaries        ← needed for zoom_meeting_summary_list
+meeting:read:summary               ← needed for zoom_meeting_summary_get
+cloud_recording:read:list_user_recordings
+cloud_recording:read:list_recording_files
+cloud_recording:read:recording
+cloud_recording:read:meeting_transcript
+cloud_recording:read:content
 ```
+
+After adding scopes in [marketplace.zoom.us](https://marketplace.zoom.us/develop/apps), users must `zoom_auth_logout` then `zoom_auth_login` to get a refreshed token with the new scopes.
+
+> **Scope name pitfalls** (verified live):
+> - There is no `meeting:read:list_meetings:admin`, no `meeting:read:list_summaries:admin`, no `meeting:read:summary:admin` in the Zoom Marketplace catalogue — Zoom's 4711 error message *suggests* `:admin` variants but only the non-admin names actually exist for end-user OAuth apps.
+> - `meeting_summary:read:summary` (note the underscore) appeared in the older README but is **not** what Zoom checks — the right name is `meeting:read:summary`.
+
+## Security & data handling
+
+- **TLS 1.2+ enforced** on all Zoom traffic
+- **PKCE** — no `client_secret` ever distributed or stored
+- **OAuth tokens Fernet-encrypted at rest** (mode 0600)
+- **SQLite metadata cache** stores channel/contact/meeting names and IDs only — **no message bodies or transcript content on disk**
+- **Logs scrub** bearer tokens, refresh tokens, message bodies, transcript text, search queries, and email addresses
+- **`zoom_auth_logout`** wipes everything
 
 ## Forking
 
@@ -149,11 +160,11 @@ To use this with a different Zoom app:
 
 | Problem | Fix |
 |---|---|
-| "Port 8000 already in use" | `lsof -i :8000`; kill the conflicting process; re-run `zoom_authenticate` |
-| Auth window closed without authorising | Re-run `zoom_authenticate` |
-| Tokens expired and refresh fails | Run `zoom_revoke_authentication`, then `zoom_authenticate` |
-| AI Companion tools 404 (`code:2300`) | The `/ai_companion/search` and `/ai_companion/ask` REST endpoints aren't exposed publicly by Zoom. Use `zoom_search_messages` for cross-chat search instead. |
-| `HTTP 400 (Zoom code 4711)` on a tool | Zoom OAuth app missing a scope. Add the named scope(s) in [marketplace.zoom.us](https://marketplace.zoom.us/develop/apps), then `zoom_auth_logout` + `zoom_auth_login` to refresh the token. |
+| "Port 8000 already in use" | `lsof -i :8000`; kill the conflicting process; re-run `zoom_auth_login` |
+| Auth window closed without authorising | Re-run `zoom_auth_login` |
+| Tokens expired and refresh fails | `zoom_auth_logout`, then `zoom_auth_login` |
+| `HTTP 400 (Zoom code 4711)` on a tool | Zoom OAuth app missing a scope. The error message names exactly which one. Add it in [marketplace.zoom.us](https://marketplace.zoom.us/develop/apps), then `zoom_auth_logout` + `zoom_auth_login`. |
+| `zoom_search_messages` returns 0 hits when you expect matches | Zoom caps search windows to ~24h server-side. For older content, use `zoom_message_history` with a date range instead. |
 
 ## Development
 
@@ -163,10 +174,11 @@ cd zoom-mcp-server
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
-.venv/bin/pytest                 # run test suite
-./scripts/dev-run.sh             # run from source
-./scripts/build_mcpb.sh          # build .mcpb for host platform
-./scripts/build_mcpb.sh --all    # build .mcpb for all 4 platforms
+.venv/bin/pytest                       # 109 tests
+./scripts/dev-run.sh                   # run from source
+./scripts/build_mcpb.sh                # build .mcpb for host platform
+./scripts/build_mcpb.sh --all          # build .mcpb for all 4 platforms
+python3 scripts/diag_endpoints.py      # live-probe endpoints (uses local tokens)
 ```
 
 ## License

@@ -1,8 +1,14 @@
 """Zoom AI Companion meeting summaries.
 
-These are the *real* AI Companion APIs (`meeting_summary:read:summary`).
-The `/ai_companion/search` and `/ai_companion/ask` endpoints I originally
-planned do not exist publicly.
+These are the only chat-/meeting-AI REST endpoints Zoom actually
+exposes — verified against Zoom's published AI Companion OpenAPI spec
+(only one endpoint there: /aic/users/{userId}/conversation_archive,
+admin-only, archive-download). The `/ai_companion/search` and
+`/ai_companion/ask` URLs are not public REST methods.
+
+Required scopes (must be enabled on the Zoom dev app):
+  - meeting:read:list_summaries  → list_meeting_summaries
+  - meeting:read:summary          → get_meeting_summary
 """
 from typing import Any, Dict, List, Optional
 

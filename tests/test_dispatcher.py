@@ -140,10 +140,10 @@ async def test_paginate_all_respects_max_items(httpx_mock):
     assert items == [1, 2, 3]
 
 
-def test_endpoints_table_has_25_tools():
+def test_endpoints_table_has_22_tools():
     from server.endpoints import ENDPOINTS
 
-    assert len(ENDPOINTS) == 25
+    assert len(ENDPOINTS) == 22
 
 
 def test_endpoints_have_unique_names():
@@ -163,9 +163,7 @@ def test_endpoints_all_have_handler():
 def test_endpoint_by_name_lookup():
     from server.endpoints import endpoint_by_name
 
-    # AI Companion search
-    assert endpoint_by_name("zoom_search_ai")["handler"] == "ai_companion_search"
-    # Manual fan-out fallback
+    # Manual fan-out search across chat
     assert endpoint_by_name("zoom_search_messages")["handler"] == "search_messages"
 
 
@@ -174,3 +172,22 @@ def test_endpoint_by_name_raises_keyerror():
 
     with pytest.raises(KeyError):
         endpoint_by_name("zoom_unknown")
+
+
+def test_dead_endpoints_are_not_registered():
+    """v2.2.5: tools whose Zoom REST URLs don't exist publicly must NOT
+    be registered. Adding them back without proof Zoom shipped the
+    endpoint will fail this test."""
+    from server.endpoints import ENDPOINTS
+
+    names = {e["name"] for e in ENDPOINTS}
+    assert "zoom_search_ai" not in names, (
+        "AI Companion REST search/ask endpoints don't exist publicly — "
+        "verified via Zoom's official AI Companion OpenAPI spec, which "
+        "lists only /aic/users/{userId}/conversation_archive."
+    )
+    assert "zoom_search_ask" not in names
+    assert "zoom_message_mentions" not in names, (
+        "/chat/channels/{id}/mention_groups returns code 2300 ('endpoint "
+        "not recognized') for every URL variant."
+    )
