@@ -101,7 +101,7 @@ zoom-mcp-server/
 └── (NO setup.sh, zoom_wrapper.sh, .env.example, base_mcp_server.py at root)
 ```
 
-## 5. Tool Surface (read-only, 20 tools)
+## 5. Tool Surface (read-only, 22 tools)
 
 | # | Tool | Purpose | Cached? |
 |---|---|---|---|
@@ -123,8 +123,10 @@ zoom-mcp-server/
 | 16 | `zoom_list_mention_groups` | Mention groups (`@engineering`-style) in a channel | yes (1h) |
 | 17 | `zoom_list_shared_spaces` | Shared spaces user belongs to | yes (1h) |
 | 18 | `zoom_get_shared_space` | Shared-space detail + channels + members (via `include` arg) | yes (1h) |
-| 19 | `zoom_list_recordings` | List user's cloud recordings (recorded-only meetings) | metadata cached |
-| 20 | `zoom_get_meeting_transcript` | Download + parse transcript (VTT → text); never persisted on disk | live, never cached |
+| 19 | `zoom_list_meetings` | List meetings (past + upcoming); filters: date range, topic, participant | metadata cached |
+| 20 | `zoom_get_meeting` | Meeting detail incl. participant list and recording-files manifest | metadata cached |
+| 21 | `zoom_list_recordings` | List user's cloud recordings | metadata cached |
+| 22 | `zoom_get_meeting_transcript` | Download + parse transcript (VTT → text); never persisted on disk | live, never cached |
 
 ### 5.1 Tool argument shapes
 
@@ -456,7 +458,7 @@ OAuth-authenticated requests (currently bypass v1 retry logic at `utils/oauth_ha
 
 ## 12. OAuth Scopes (granular, read-only)
 
-The Zoom Marketplace app for v2 requests the following 27 granular scopes:
+The Zoom Marketplace app for v2 requests the following 28 granular scopes:
 
 **AI Companion** (powers `zoom_search`, `zoom_ask`):
 ```
@@ -467,6 +469,11 @@ ai_companion:read:search
 **Contacts:**
 ```
 contact:read:list_contacts
+```
+
+**Meetings:**
+```
+meeting:read:meeting
 ```
 
 **Recordings & transcripts:**
@@ -513,7 +520,6 @@ user:read:user
 | All `team_chat:write:*` and `team_chat:update:*` | Read-only design |
 | `imchat:userapp` | Not building an in-client app |
 | All `meeting:read:meeting_audio/video/chat/screenshare/transcript` | Real-time meeting integrations out of scope; cloud-recording transcripts cover the use case |
-| `meeting:read:meeting` | v2 surfaces only recorded meetings (via `cloud_recording:read:*`); non-recorded meeting metadata is out of scope |
 | `cloud_recording:read:recording_settings` | Recording settings not surfaced |
 | `team_chat:read:invite_link`, `:list_invitations`, `:list_approvals`, `:list_reminders`, `:list_scheduled_messages` | Admin/personal-state features out of scope |
 | `team_chat:read:list_custom_emojis`, `:archive_channels`, `:list_user_sessions` | Low value |
@@ -576,12 +582,15 @@ zoom-team-chat-search-<platform>.mcpb (zip)
 
 ```json
 {
-  "dxt_version": "0.1",
+  "manifest_version": "0.2",
   "name": "zoom-team-chat-search",
   "display_name": "Zoom Team Chat & Transcripts",
   "version": "2.0.0",
   "description": "Read-only search across Zoom Team Chat messages and meeting transcripts.",
   "author": {"name": "Alex Craig"},
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": ["zoom", "team chat", "transcripts", "search"],
   "server": {
     "type": "python",
     "entry_point": "server/main.py",
@@ -592,11 +601,11 @@ zoom-team-chat-search-<platform>.mcpb (zip)
         "ZOOM_CLIENT_ID":     "${user_config.client_id}",
         "ZOOM_CLIENT_SECRET": "${user_config.client_secret}",
         "ZOOM_REDIRECT_URI":  "${user_config.redirect_uri}",
-        "PYTHONPATH":         "${__dirname}/lib/python"
+        "PYTHONPATH":         "${__dirname}/server/lib"
       }
     }
   },
-  "tools": [/* generated from endpoints.py at build time */],
+  "tools_generated": true,
   "user_config": {
     "client_id": {
       "type": "string",
@@ -615,11 +624,11 @@ zoom-team-chat-search-<platform>.mcpb (zip)
       "type": "string",
       "title": "OAuth Redirect URI",
       "description": "Must match the redirect URI configured on your Zoom app.",
-      "default": "http://localhost:8000/oauth/callback"
+      "default": "http://localhost:8000/oauth/callback",
+      "required": false
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
     "runtimes": {"python": ">=3.10"}
   }
 }
@@ -627,23 +636,55 @@ zoom-team-chat-search-<platform>.mcpb (zip)
 
 ### 14.3 Build script
 
-`scripts/build_mcpb.sh` produces 4 platform-specific `.mcpb` files by:
+`scripts/build_mcpb.sh` produces 4 platform-specific `.mcpb` files using the official `@anthropic-ai/mcpb` packaging tool:
 
 ```bash
-for platform in darwin-arm64 darwin-x64 manylinux_2_17_x86_64 win_amd64; do
-  rm -rf build/lib/python && mkdir -p build/lib/python
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DIST="$ROOT/dist"
+mkdir -p "$DIST"
+
+PLATFORMS=("macosx_11_0_arm64" "macosx_11_0_x86_64" \
+           "manylinux_2_17_x86_64" "win_amd64")
+PLATFORM_TAGS=("darwin-arm64" "darwin-x64" "linux-x64" "win-x64")
+
+for i in "${!PLATFORMS[@]}"; do
+  PIP_PLATFORM="${PLATFORMS[$i]}"
+  TAG="${PLATFORM_TAGS[$i]}"
+  STAGE="$ROOT/build/$TAG"
+
+  rm -rf "$STAGE"
+  mkdir -p "$STAGE/server/lib"
+
+  cp -r "$ROOT/server" "$STAGE/"
+  cp "$ROOT/manifest.json" "$STAGE/"
+  cp "$ROOT/icon.png"      "$STAGE/"
+
   pip download \
-    --platform "$platform" \
+    --platform "$PIP_PLATFORM" \
     --python-version 3.11 \
     --only-binary :all: \
-    -d build/lib/python \
-    -r requirements.txt
-  # unpack wheels into lib/python flat layout
-  for whl in build/lib/python/*.whl; do
-    unzip -qo "$whl" -d build/lib/python && rm "$whl"
+    --no-deps -d "$STAGE/server/lib" \
+    -r "$ROOT/requirements.txt"
+
+  # Resolve transitive deps too
+  pip download \
+    --platform "$PIP_PLATFORM" \
+    --python-version 3.11 \
+    --only-binary :all: \
+    -d "$STAGE/server/lib" \
+    -r "$ROOT/requirements.txt"
+
+  # Unpack wheels for runtime import
+  for whl in "$STAGE/server/lib"/*.whl; do
+    unzip -qo "$whl" -d "$STAGE/server/lib"
+    rm "$whl"
   done
-  cp -r server icon.png manifest.json build/
-  (cd build && zip -qr "../dist/zoom-mcp-${platform}.mcpb" .)
+
+  npx --yes @anthropic-ai/mcpb pack "$STAGE" "$DIST/zoom-mcp-${TAG}.mcpb"
+  rm -rf "$STAGE"
 done
 ```
 
