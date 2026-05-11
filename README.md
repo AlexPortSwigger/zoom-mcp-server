@@ -19,6 +19,10 @@ Read-only MCP server for Zoom Team Chat and meeting transcripts. **Zero-config**
 | "Recent meeting summaries" | `zoom_meeting_list` then `zoom_meeting_summary_get` per meeting |
 | "Transcript of meeting X" | `zoom_meeting_transcript(meeting_id)` |
 
+### Default date window
+
+`zoom_message_history` and `zoom_search_messages` default `from_date` to **7 days ago** when no dates are supplied (anchored at `to_date` if that one alone is given). Pass explicit `from_date`/`to_date` for any other range. Note that `zoom_search_messages` is still capped server-side by Zoom to ~24h regardless of what's passed (see below).
+
 ### Two-tier search
 
 Zoom's native keyword search (`/chat/users/me/messages?search_type=message`) is fast but **server-side capped to ~24 hours of history regardless of `from_date`/`to_date`**. To search older content (which the Zoom UI search clearly indexes), v2.2.8 added `zoom_search_history`: it reads each channel/DM's full history via browse mode and filters keywords client-side. Slower (a few seconds per scan) but unbounded in time. Recommended pattern:

@@ -4,7 +4,29 @@ Maps endpoints.ENDPOINTS to handler methods on ZoomTools.
 """
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+
+_DEFAULT_WINDOW_DAYS = 7
+
+
+def _default_from_date(
+    from_date: Any, to_date: Any
+) -> tuple[Any, Any]:
+    """If neither date is supplied, default `from_date` to 7 days ago (UTC).
+    Anchored at `to_date` if that one alone is given."""
+    if from_date:
+        return from_date, to_date
+    anchor = datetime.now(timezone.utc)
+    if to_date:
+        try:
+            anchor = datetime.fromisoformat(str(to_date).replace("Z", "+00:00"))
+            if anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=timezone.utc)
+        except ValueError:
+            anchor = datetime.now(timezone.utc)
+    default_from = (anchor - timedelta(days=_DEFAULT_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    return default_from, to_date
 
 from mcp.types import Tool, ToolAnnotations
 
@@ -197,13 +219,16 @@ class ZoomTools:
         if not contacts:
             await self._refresh_contacts()
             contacts = self.cache.get_contacts()
+        from_date, to_date = _default_from_date(
+            args.get("from_date"), args.get("to_date")
+        )
         out = await search.search_messages(
             self.oauth,
             channels=channels,
             contacts=contacts,
             query=args["query"],
-            from_date=args.get("from_date"),
-            to_date=args.get("to_date"),
+            from_date=from_date,
+            to_date=to_date,
             channel_filter=args.get("channel_filter"),
             max_results=int(args.get("max_results", 100)),
         )
@@ -395,12 +420,15 @@ class ZoomTools:
             contact_id = await self._resolve_contact_id(args["contact"])
         if not channel_id and not contact_id:
             return _err("Either 'channel' or 'contact' is required.")
+        from_date, to_date = _default_from_date(
+            args.get("from_date"), args.get("to_date")
+        )
         items = await messages.get_channel_history(
             self.oauth,
             channel_id=channel_id,
             contact_id=contact_id,
-            from_date=args.get("from_date"),
-            to_date=args.get("to_date"),
+            from_date=from_date,
+            to_date=to_date,
             max_messages=int(args.get("max_messages", 500)),
         )
         return _json({"messages": items, "count": len(items)})

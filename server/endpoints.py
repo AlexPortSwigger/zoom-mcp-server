@@ -58,7 +58,13 @@ ENDPOINTS: List[Dict[str, Any]] = [
         "summary": (
             "Resolve a name or email to a channel/contact/user ID using the "
             "local cache. Use this to translate human-friendly names into "
-            "the IDs other tools want."
+            "the IDs other tools want.\n\n"
+            "**Personalisation tip:** when the user repeatedly references "
+            "the same people or channels by short or ambiguous names "
+            "(e.g. 'Matt', 'the strategy chat', 'our team channel'), record "
+            "which specific contact/channel they meant in your memory or "
+            "project CLAUDE.md after confirming. Future references can then "
+            "resolve directly — no re-scan, no clarifying question."
         ),
         "handler": "resolve",
         "body": {
@@ -87,7 +93,13 @@ ENDPOINTS: List[Dict[str, Any]] = [
             "Note: Zoom's `/chat/users/me/channels` REST endpoint does "
             "not expose 'starred' status, so we can't filter to "
             "starred-only here. For narrowing, use `name_filter` or "
-            "scan results client-side."
+            "scan results client-side.\n\n"
+            "**Personalisation tip:** Zoom workspaces often have hundreds "
+            "or thousands of channels but each user actively cares about "
+            "a handful. When the same channels recur across a user's "
+            "queries, record the shortlist in your memory or project "
+            "CLAUDE.md so future lookups can target them by ID directly "
+            "instead of paging the full list."
         ),
         "handler": "list_channels",
         "body": {
@@ -307,12 +319,14 @@ ENDPOINTS: List[Dict[str, Any]] = [
                 "description": (
                     "Start of window. ISO-8601 datetime "
                     "(e.g. '2026-05-09T00:00:00Z') or yyyy-MM-dd. "
-                    "Default: ~last few days."
+                    "Default: 7 days before to_date (or 7 days ago when "
+                    "neither is given). Pass an explicit value for any "
+                    "other range."
                 ),
             },
             "to_date": {
                 "type": "string",
-                "description": "End of window. Same formats as from_date.",
+                "description": "End of window. Same formats as from_date. Default: now.",
             },
             "max_messages": {
                 "type": "integer",
@@ -433,13 +447,19 @@ ENDPOINTS: List[Dict[str, Any]] = [
             "from_date": {
                 "type": "string",
                 "description": (
-                    "yyyy-MM-dd start. Note: Zoom caps the effective window "
-                    "to ~24h regardless of what's passed."
+                    "yyyy-MM-dd start. Default: 7 days ago. Note: Zoom "
+                    "may cap the effective window to ~24h server-side "
+                    "regardless of what's passed — if you get 0 hits "
+                    "and expect older matches, fall back to "
+                    "`zoom_search_history`."
                 ),
             },
             "to_date": {
                 "type": "string",
-                "description": "yyyy-MM-dd end (also subject to ~24h cap).",
+                "description": (
+                    "yyyy-MM-dd end. Default: now. Also subject to "
+                    "Zoom's ~24h server-side cap."
+                ),
             },
             "channel_filter": {
                 "type": "string",
