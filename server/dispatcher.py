@@ -56,6 +56,28 @@ def format_zoom_error(status_code: int, body_text: str) -> str:
     return f"HTTP {status_code}: {body_short}"
 
 
+async def fetch_one_page(
+    method: str,
+    url: str,
+    *,
+    headers: Dict[str, str],
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Fetch a single API page and return the parsed JSON body.
+
+    Raises httpx.HTTPStatusError (with a human-readable Zoom error message)
+    on any non-200 response so callers don't have to inspect status codes.
+    """
+    r = await request_with_retry(method, url, headers=headers, params=params or {})
+    if r.status_code != 200:
+        raise httpx.HTTPStatusError(
+            format_zoom_error(r.status_code, r.text),
+            request=r.request,
+            response=r,
+        )
+    return r.json()
+
+
 async def paginate_all(
     method: str,
     url: str,

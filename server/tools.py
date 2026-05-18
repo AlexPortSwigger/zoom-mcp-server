@@ -39,7 +39,7 @@ from . import (
     transcripts,
 )
 from .cache.store import CacheStore
-from .dispatcher import paginate_all
+from .dispatcher import fetch_one_page, paginate_all
 from .endpoints import API_BASE, ENDPOINTS, endpoint_by_name
 from .oauth import ZoomOAuthHandler
 
@@ -307,11 +307,40 @@ class ZoomTools:
             f"{API_BASE}/chat/users/me/channels",
             items_key="channels",
             headers=headers,
+            page_size=50,   # Zoom channels endpoint cap
+            max_items=None,
         )
         self.cache.put_channels(items)
         return items
 
     async def _h_list_channels(self, args):
+        page_size = args.get("page_size")
+        next_page_token = args.get("next_page_token")
+
+        if page_size is not None or next_page_token:
+            # Paginated single-page path — bypass cache, let caller loop.
+            clamped = max(1, min(int(page_size or 50), 50))
+            params: dict = {"page_size": clamped}
+            if next_page_token:
+                params["next_page_token"] = next_page_token
+            headers = self.oauth.get_auth_headers()
+            data = await fetch_one_page(
+                "GET", f"{API_BASE}/chat/users/me/channels",
+                headers=headers, params=params,
+            )
+            rows = data.get("channels", [])
+            name_filter = (args.get("name_filter") or "").strip().lower()
+            if name_filter:
+                rows = [r for r in rows if name_filter in (r.get("name") or "").lower()]
+            result: dict = {"channels": rows, "count": len(rows)}
+            out_token = data.get("next_page_token") or ""
+            if out_token:
+                result["next_page_token"] = out_token
+            if "total_records" in data:
+                result["total_records"] = data["total_records"]
+            return _json(result)
+
+        # Cache-first path (no pagination params supplied).
         if args.get("force_refresh"):
             await self._refresh_channels()
         rows = self.cache.get_channels()

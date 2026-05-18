@@ -90,6 +90,11 @@ ENDPOINTS: List[Dict[str, Any]] = [
             "discover what channels exist when the user asks 'what "
             "channels am I in?'. Cache-first; data is fresh on first "
             "launch and refreshes lazily.\n\n"
+            "Pagination: supply `page_size` and/or `next_page_token` to "
+            "fetch one page at a time directly from the Zoom API (bypasses "
+            "cache). The response then includes `next_page_token` (absent "
+            "when no more pages remain) and `total_records` (when Zoom "
+            "returns it). Omit both params to get the full cached list.\n\n"
             "Note: Zoom's `/chat/users/me/channels` REST endpoint does "
             "not expose 'starred' status, so we can't filter to "
             "starred-only here. For narrowing, use `name_filter` or "
@@ -112,6 +117,23 @@ ENDPOINTS: List[Dict[str, Any]] = [
                 "description": (
                     "Optional case-insensitive substring of channel name "
                     "to narrow results (e.g. 'eng', 'product', 'devs')."
+                ),
+            },
+            "page_size": {
+                "type": "integer",
+                "description": (
+                    "Number of channels to return per page. Max 50 per "
+                    "Zoom API. Default: 50. Providing this (or "
+                    "next_page_token) switches to the paginated single-page "
+                    "path and bypasses the local cache."
+                ),
+            },
+            "next_page_token": {
+                "type": "string",
+                "description": (
+                    "Pagination token from a previous call's response. "
+                    "Omit on the first request; pass the returned token to "
+                    "fetch the next page."
                 ),
             },
         },
