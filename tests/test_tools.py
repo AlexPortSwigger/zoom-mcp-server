@@ -259,3 +259,89 @@ async def test_chat_channels_no_starred_only_param(authed_oauth, cache):
     )
     # All channels still returned — starred_only no longer filters
     assert '"count": 1' in out[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_chat_channels_pagination_single_page(authed_oauth, cache, monkeypatch):
+    """page_size triggers the single-page API path; next_page_token is returned."""
+    import server.tools as tools_mod
+
+    async def fake_fetch_one_page(method, url, *, headers, params):
+        assert params["page_size"] == 10
+        return {
+            "channels": [{"id": "C1", "name": "alpha", "type": 3}],
+            "next_page_token": "tok123",
+            "total_records": 5,
+        }
+
+    monkeypatch.setattr(tools_mod, "fetch_one_page", fake_fetch_one_page)
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_chat_channels", {"page_size": 10}
+    )
+    text = out[0]["text"]
+    assert '"count": 1' in text
+    assert "tok123" in text
+    assert '"total_records": 5' in text
+
+
+@pytest.mark.asyncio
+async def test_chat_channels_pagination_with_token(authed_oauth, cache, monkeypatch):
+    """next_page_token is forwarded to the API and absent in final-page response."""
+    import server.tools as tools_mod
+
+    async def fake_fetch_one_page(method, url, *, headers, params):
+        assert params.get("next_page_token") == "tok123"
+        # Final page — Zoom omits next_page_token
+        return {
+            "channels": [{"id": "C2", "name": "beta", "type": 1}],
+            "total_records": 2,
+        }
+
+    monkeypatch.setattr(tools_mod, "fetch_one_page", fake_fetch_one_page)
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_chat_channels", {"next_page_token": "tok123"}
+    )
+    text = out[0]["text"]
+    assert "beta" in text
+    assert "next_page_token" not in text
+
+
+@pytest.mark.asyncio
+async def test_chat_channels_pagination_clamps_page_size(authed_oauth, cache, monkeypatch):
+    """page_size is clamped to Zoom's maximum of 50."""
+    import server.tools as tools_mod
+
+    captured = {}
+
+    async def fake_fetch_one_page(method, url, *, headers, params):
+        captured["page_size"] = params["page_size"]
+        return {"channels": []}
+
+    monkeypatch.setattr(tools_mod, "fetch_one_page", fake_fetch_one_page)
+    await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_chat_channels", {"page_size": 999}
+    )
+    assert captured["page_size"] == 50
+
+
+@pytest.mark.asyncio
+async def test_chat_channels_pagination_name_filter_applied(authed_oauth, cache, monkeypatch):
+    """name_filter still works on a single paginated page."""
+    import server.tools as tools_mod
+
+    async def fake_fetch_one_page(method, url, *, headers, params):
+        return {
+            "channels": [
+                {"id": "C1", "name": "Engineering", "type": 3},
+                {"id": "C2", "name": "Sales", "type": 3},
+            ],
+        }
+
+    monkeypatch.setattr(tools_mod, "fetch_one_page", fake_fetch_one_page)
+    out = await ZoomTools(authed_oauth, cache).call_tool(
+        "zoom_chat_channels", {"page_size": 50, "name_filter": "eng"}
+    )
+    text = out[0]["text"]
+    assert '"count": 1' in text
+    assert "Engineering" in text
+    assert "Sales" not in text
