@@ -391,8 +391,8 @@ async def test_search_history_filters_messages_by_substring(httpx_mock):
         method="GET",
         url=httpx.URL(
             "https://api.zoom.us/v2/chat/users/me/messages",
-            params={"to_channel": "C1", "from": "2026-04-01",
-                    "to": "2026-05-01", "page_size": 50},
+            params={"to_channel": "C1", "from": "2026-04-01T00:00:00Z",
+                    "to": "2026-05-01T23:59:59Z", "page_size": 50},
         ),
         json={
             "messages": [
@@ -434,7 +434,7 @@ async def test_search_history_sender_filter(httpx_mock):
         method="GET",
         url=httpx.URL(
             "https://api.zoom.us/v2/chat/users/me/messages",
-            params={"to_channel": "C1", "from": "2026-04-01", "page_size": 50},
+            params={"to_channel": "C1", "from": "2026-04-01T00:00:00Z", "page_size": 50},
         ),
         json={
             "messages": [
@@ -468,7 +468,7 @@ async def test_search_history_sender_filter_matches_display_name(httpx_mock):
         method="GET",
         url=httpx.URL(
             "https://api.zoom.us/v2/chat/users/me/messages",
-            params={"to_channel": "C1", "from": "2026-04-01", "page_size": 50},
+            params={"to_channel": "C1", "from": "2026-04-01T00:00:00Z", "page_size": 50},
         ),
         json={
             "messages": [
@@ -501,7 +501,7 @@ async def test_search_history_aggregates_across_scopes(httpx_mock):
             method="GET",
             url=httpx.URL(
                 "https://api.zoom.us/v2/chat/users/me/messages",
-                params={"to_channel": ch, "from": "2026-04-01", "page_size": 50},
+                params={"to_channel": ch, "from": "2026-04-01T00:00:00Z", "page_size": 50},
             ),
             json={
                 "messages": [
@@ -514,7 +514,7 @@ async def test_search_history_aggregates_across_scopes(httpx_mock):
         method="GET",
         url=httpx.URL(
             "https://api.zoom.us/v2/chat/users/me/messages",
-            params={"to_contact": "U1", "from": "2026-04-01", "page_size": 50},
+            params={"to_contact": "U1", "from": "2026-04-01T00:00:00Z", "page_size": 50},
         ),
         json={
             "messages": [

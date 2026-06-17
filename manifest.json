@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "zoom-workplace",
   "display_name": "Zoom Workplace",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "Search Zoom Team Chat, ask AI Companion grounded questions, and read meeting transcripts — all in Claude.",
   "long_description": "Bring your Zoom Workplace into Claude. Search messages, channels, and meetings with AI Companion; ask grounded questions with citations; browse channels, contacts, and shared spaces; read meeting transcripts and AI-generated summaries; resolve people and channels by name. Read-only by design, secured with PKCE (no client secret), and zero-config for PortSwigger Swiggers — double-click to install and authorise once.",
   "author": {"name": "Alex Craig"},
