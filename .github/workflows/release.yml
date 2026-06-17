@@ -1,0 +1,59 @@
+name: Release
+
+# Mirrors the openai-mcp release pipeline: push a version tag (v*.*.*) and this
+# builds the .mcpb bundle(s) and publishes a GitHub Release with the assets
+# attached. Unlike openai-mcp (a single Node bundle), zoom-mcp is a Python
+# project that ships four platform-specific bundles, all cross-built from this
+# one Linux runner via scripts/build_mcpb.sh --all.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Build all platform bundles
+        run: ./scripts/build_mcpb.sh --all
+
+      - name: Determine prerelease
+        id: prerelease
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *"-"* ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: ${{ steps.prerelease.outputs.value }}
+          generate_release_notes: true
+          files: dist/*.mcpb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
