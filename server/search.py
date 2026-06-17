@@ -56,9 +56,9 @@ async def _search_one(
         if to_contact:
             params["to_contact"] = to_contact
         if from_date:
-            params["from"] = from_date
+            params["from"] = messages.to_zoom_ts(from_date)
         if to_date:
-            params["to"] = to_date
+            params["to"] = messages.to_zoom_ts(to_date, end_of_day=True)
 
         try:
             r = await request_with_retry(
