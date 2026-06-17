@@ -1,8 +1,21 @@
 """Message-listing tools (channel history, threads, single message lookup, pinned, bookmarks, mention groups)."""
+import re
 from typing import Any, Dict, List, Optional
 
 from .dispatcher import paginate_all
 from .endpoints import API_BASE
+
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def to_zoom_ts(value: Optional[str], *, end_of_day: bool = False) -> Optional[str]:
+    """Normalise a date/datetime to the ISO-8601 form Zoom's chat message endpoint requires (``yyyy-MM-ddTHH:mm:ssZ``).
+    """
+    if not value:
+        return None
+    if _DATE_ONLY.match(value):
+        return f"{value}T23:59:59Z" if end_of_day else f"{value}T00:00:00Z"
+    return value
 
 
 def _scope_params(
@@ -29,9 +42,9 @@ async def get_channel_history(
     headers = oauth_handler.get_auth_headers()
     params = _scope_params(channel_id, contact_id)
     if from_date:
-        params["from"] = from_date
+        params["from"] = to_zoom_ts(from_date)
     if to_date:
-        params["to"] = to_date
+        params["to"] = to_zoom_ts(to_date, end_of_day=True)
     return await paginate_all(
         "GET",
         f"{API_BASE}/chat/users/me/messages",
